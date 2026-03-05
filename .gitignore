@@ -1,0 +1,17 @@
+# PCAPs
+pcaps/
+*.pcap
+*.pcapng
+
+# Zeek logs / outputs
+logs/
+*.log
+*.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Env files / secrets
+.env
