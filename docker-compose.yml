@@ -3,10 +3,19 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+
+    # Keep the container running so "docker compose exec backend bash" works
+    command: ["bash", "-lc", "sleep infinity"]
+    stdin_open: true
+    tty: true
+
+    # Mount your local zeek-project folders into the container
+    volumes:
+      - ./pcaps:/data/pcaps
+      - ./logs:/data/logs
+      - ./scripts:/data/scripts
+      - ./output:/data/output
+
+    # Optional: only needed if you later run an API on 8000
     ports:
       - "8000:8000"
-    volumes:
-      - ./backend:/app/backend
-      - ./logs:/data/logs
-      - ./pcaps:/data/pcaps
-    command: ["bash"]
