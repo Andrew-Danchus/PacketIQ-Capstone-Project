@@ -4,13 +4,13 @@ import json
 from collections import Counter, defaultdict
 
 from backend.ollama.service import analyze_evidence
-from backend.rag.pipeline import build_rag_context
+from backend.rag.pipeline import build_rag_index, query_rag_context
 from backend.detection.detection import run_detections
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 PCAP_DIR = PROJECT_ROOT / "pcaps"
-LOG_DIR = PROJECT_ROOT / "logs"
+LOG_BASE_DIR = PROJECT_ROOT / "logs"
 
 
 def list_pcap_files():
@@ -48,24 +48,35 @@ def choose_pcap_file(pcaps):
         print("Choice out of range.")
 
 
-def clear_logs_folder():
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-    for file in LOG_DIR.iterdir():
-        if file.is_file():
-            try:
-                file.unlink()
-            except Exception as e:
-                print(f"Could not delete {file.name}: {e}")
+def get_log_dir(pcap_path: Path) -> Path:
+    """Return the log directory for the given PCAP (logs/<pcap_stem>/)."""
+    return LOG_BASE_DIR / pcap_path.stem
 
 
-def run_zeek_on_pcap(pcap_path: Path):
-    clear_logs_folder()
+def logs_exist(log_dir: Path) -> bool:
+    """Return True if the per-PCAP log directory already contains .log files."""
+    return log_dir.is_dir() and any(log_dir.glob("*.log"))
+
+
+def run_zeek_on_pcap(pcap_path: Path, log_dir: Path) -> bool:
+    """
+    Run Zeek on the given PCAP and write logs to log_dir.
+    If log_dir already contains .log files, skip parsing and use the cached logs.
+    """
+    if logs_exist(log_dir):
+        print(f"\nCached logs found for '{pcap_path.name}' — skipping Zeek parse.")
+        print(f"Loading logs from: {log_dir}\n")
+        for log_file in sorted(log_dir.glob("*.log")):
+            print(f"- {log_file.name} ({log_file.stat().st_size} bytes)")
+        return True
+
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\nRunning Zeek on: {pcap_path.name}")
     print("This may take a moment...\n")
 
     project_root_str = str(PROJECT_ROOT).replace("\\", "/")
+    log_dir_in_container = f"/zeek/logs/{pcap_path.stem}"
 
     cmd = [
         "docker", "run", "--rm",
@@ -75,7 +86,7 @@ def run_zeek_on_pcap(pcap_path: Path):
         "-C",
         "-r", f"/zeek/pcaps/{pcap_path.name}",
         "LogAscii::use_json=T",
-        "Log::default_logdir=/zeek/logs"
+        f"Log::default_logdir={log_dir_in_container}"
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -85,7 +96,7 @@ def run_zeek_on_pcap(pcap_path: Path):
         print(result.stderr)
         return False
 
-    log_files = sorted(LOG_DIR.glob("*.log"))
+    log_files = sorted(log_dir.glob("*.log"))
     if not log_files:
         print("Zeek finished, but no .log files were found in the logs folder.")
         return False
@@ -118,12 +129,12 @@ def load_json_log(file_path: Path):
     return records
 
 
-def summarize_logs():
-    conn_log = LOG_DIR / "conn.log"
-    weird_log = LOG_DIR / "weird.log"
-    packet_filter_log = LOG_DIR / "packet_filter.log"
-    dns_log = LOG_DIR / "dns.log"
-    notice_log = LOG_DIR / "notice.log"
+def summarize_logs(log_dir: Path):
+    conn_log = log_dir / "conn.log"
+    weird_log = log_dir / "weird.log"
+    packet_filter_log = log_dir / "packet_filter.log"
+    dns_log = log_dir / "dns.log"
+    notice_log = log_dir / "notice.log"
 
     conn_records = load_json_log(conn_log)
     weird_records = load_json_log(weird_log)
@@ -318,12 +329,13 @@ def main():
     if not selected_pcap:
         return
 
-    success = run_zeek_on_pcap(selected_pcap)
+    log_dir = get_log_dir(selected_pcap)
+    success = run_zeek_on_pcap(selected_pcap, log_dir)
     if not success:
         return
 
     detection_results = None
-    conn_log_path = LOG_DIR / "conn.log"
+    conn_log_path = log_dir / "conn.log"
     if conn_log_path.exists():
         print("\n=== RUNNING DETECTIONS ===")
         try:
@@ -333,7 +345,10 @@ def main():
         except Exception as e:
             print(f"Detection failed: {e}")
 
-    evidence = summarize_logs()
+    print("\n=== BUILDING RAG INDEX ===")
+    vectorstore = build_rag_index(log_dir, detection_results)
+
+    evidence = summarize_logs(log_dir)
 
     print("\n=== PARSED SUMMARY ===\n")
     print(evidence)
@@ -342,7 +357,7 @@ def main():
 
     print("\n=== OLLAMA ANALYSIS ===\n")
     try:
-        rag_context = build_rag_context(LOG_DIR, user_question, detection_results)
+        rag_context = query_rag_context(vectorstore, user_question)
         answer = analyze_evidence(user_question, rag_context)
         print(answer)
     except Exception as e:
