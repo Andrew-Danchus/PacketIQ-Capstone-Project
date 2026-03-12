@@ -1,0 +1,7 @@
+requests
+pydantic
+langchain
+langchain-core
+langchain-ollama
+langchain-community
+faiss-cpu

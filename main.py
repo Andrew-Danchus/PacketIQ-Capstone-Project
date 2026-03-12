@@ -4,6 +4,8 @@ import json
 from collections import Counter, defaultdict
 
 from backend.ollama.service import analyze_evidence
+from backend.rag.pipeline import build_rag_context
+from backend.detection.detection import run_detections
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -320,6 +322,17 @@ def main():
     if not success:
         return
 
+    detection_results = None
+    conn_log_path = LOG_DIR / "conn.log"
+    if conn_log_path.exists():
+        print("\n=== RUNNING DETECTIONS ===")
+        try:
+            output_path = PROJECT_ROOT / "output" / "detection.json"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            detection_results = run_detections(str(conn_log_path), str(output_path))
+        except Exception as e:
+            print(f"Detection failed: {e}")
+
     evidence = summarize_logs()
 
     print("\n=== PARSED SUMMARY ===\n")
@@ -329,7 +342,8 @@ def main():
 
     print("\n=== OLLAMA ANALYSIS ===\n")
     try:
-        answer = analyze_evidence(user_question, evidence)
+        rag_context = build_rag_context(LOG_DIR, user_question, detection_results)
+        answer = analyze_evidence(user_question, rag_context)
         print(answer)
     except Exception as e:
         print(f"Ollama analysis failed: {e}")
