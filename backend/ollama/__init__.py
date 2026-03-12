@@ -1,1 +1,1 @@
-from .service import explain_alert
+from .service import analyze_evidence

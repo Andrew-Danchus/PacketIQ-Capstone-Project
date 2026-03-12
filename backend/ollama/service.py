@@ -1,15 +1,18 @@
 from .client import OllamaClient
-from .prompt_builder import build_alert_prompt
+from .prompt_builder import build_analysis_prompt
 
 client = OllamaClient()
 
-def explain_alert(alert_type: str, evidence: str) -> str:
-    prompt = build_alert_prompt(alert_type, evidence)
+def analyze_evidence(question: str, evidence: str) -> str:
+    prompt = build_analysis_prompt(question, evidence)
 
     messages = [
         {
             "role": "system",
-            "content": "You are a cybersecurity analyst. Use only the supplied evidence."
+            "content": (
+                "You are a cybersecurity analyst specializing in network forensics. "
+                "Answer the user's question directly using only the provided Zeek evidence."
+            )
         },
         {
             "role": "user",

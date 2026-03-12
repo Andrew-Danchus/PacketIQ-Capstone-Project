@@ -1,17 +1,17 @@
-def build_alert_prompt(alert_type: str, evidence: str) -> str:
+def build_analysis_prompt(question: str, evidence: str) -> str:
     return f"""
 You are a network forensics analyst.
 
-Alert Type:
-{alert_type}
+User Question:
+{question}
 
-Evidence:
+Zeek Evidence:
 {evidence}
 
-Tasks:
-1. Explain what this activity means.
-2. State whether it appears suspicious.
-3. Give a severity level: low, medium, or high.
-4. Suggest 3 next investigation steps.
-5. Use only the evidence provided.
+Instructions:
+1. Answer the user's question directly and specifically.
+2. Use only the evidence provided.
+3. If the evidence supports a recommendation, explain why.
+4. If the evidence is insufficient to answer confidently, say exactly what is missing.
+5. Be concise but useful.
 """.strip()
