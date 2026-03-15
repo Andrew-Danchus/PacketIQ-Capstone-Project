@@ -6,4 +6,3 @@ frontend/
 logs/
 pcaps/
 .git/
-backend\ollama\__pycache__
