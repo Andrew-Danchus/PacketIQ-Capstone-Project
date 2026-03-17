@@ -1,25 +1,37 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
+const INITIAL_MESSAGE = {
+  role: 'ai',
+  type: 'text',
+  text: 'PacketIQ Ready. Upload a PCAP file with the + button, paste one in, or type a file path and click Analyze.',
+};
+
 function App() {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState([
-    { role: 'ai', type: 'text', text: 'PacketIQ Ready. Upload a PCAP file with the + button, or type a file path and click Analyze.' }
-  ]);
+  const [messages, setMessages] = useState([INITIAL_MESSAGE]);
   const [evidence, setEvidence] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [pcapList, setPcapList] = useState([]);
   const chatEndRef = useRef(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
+  useEffect(() => {
+    fetch('/api/pcaps')
+      .then(r => r.json())
+      .then(setPcapList)
+      .catch(() => {});
+  }, []);
+
   const addMessage = (msg) => setMessages(prev => [...prev, msg]);
 
   const analyzeFile = async (file) => {
     setLoading(true);
     addMessage({ role: 'user', type: 'file', text: file.name });
-    addMessage({ role: 'system', text: `Zeek: Extracting metadata from ${file.name}...` });
+    addMessage({ role: 'system', text: `Zeek: Extracting metadata from ${file.name}…` });
 
     const formData = new FormData();
     formData.append('file', file);
@@ -30,7 +42,8 @@ function App() {
       if (!res.ok) throw new Error(data.error || 'Analysis failed');
 
       setEvidence(data.evidence);
-      addMessage({ role: 'system', text: 'Zeek: Parsing complete. Querying PacketIQ AI...' });
+      fetch('/api/pcaps').then(r => r.json()).then(setPcapList).catch(() => {});
+      addMessage({ role: 'system', text: 'Zeek: Parsing complete. Querying PacketIQ AI…' });
       await getInitialSummary(data.evidence);
     } catch (err) {
       addMessage({ role: 'system', text: `Error: ${err.message}` });
@@ -42,19 +55,19 @@ function App() {
   const analyzePath = async (path) => {
     setLoading(true);
     addMessage({ role: 'user', type: 'text', text: path });
-    addMessage({ role: 'system', text: `Zeek: Extracting metadata from ${path}...` });
+    addMessage({ role: 'system', text: `Zeek: Extracting metadata from ${path}…` });
 
     try {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path })
+        body: JSON.stringify({ path }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Analysis failed');
 
       setEvidence(data.evidence);
-      addMessage({ role: 'system', text: 'Zeek: Parsing complete. Querying PacketIQ AI...' });
+      addMessage({ role: 'system', text: 'Zeek: Parsing complete. Querying PacketIQ AI…' });
       await getInitialSummary(data.evidence);
     } catch (err) {
       addMessage({ role: 'system', text: `Error: ${err.message}` });
@@ -69,8 +82,8 @@ function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         question: 'Summarize suspicious activity and recommend next investigation steps.',
-        evidence: ev
-      })
+        evidence: ev,
+      }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'AI analysis failed');
@@ -85,7 +98,7 @@ function App() {
       const res = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, evidence })
+        body: JSON.stringify({ question, evidence }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI query failed');
@@ -128,20 +141,37 @@ function App() {
 
   const handleNewSession = () => {
     setEvidence(null);
-    setMessages([{ role: 'ai', type: 'text', text: 'PacketIQ Ready. Upload a PCAP file with the + button, or type a file path and click Analyze.' }]);
+    setMessages([INITIAL_MESSAGE]);
   };
 
   return (
     <div className="container" onPaste={handlePaste}>
       <div className="sidebar">
-        <h2 style={{ color: '#3b82f6' }}>PacketIQ</h2>
+        <div className="sidebar-logo">PacketIQ</div>
+
         <div className="history-item active">Current Session</div>
-        <div className="history-item" onClick={handleNewSession} style={{ cursor: 'pointer' }}>+ New Session</div>
+        <div className="history-item" onClick={handleNewSession}>+ New Session</div>
+
+        {pcapList.length > 0 && (
+          <>
+            <div className="sidebar-section-label">Available PCAPs</div>
+            {pcapList.map((name) => (
+              <div
+                key={name}
+                className="pcap-item"
+                title={name}
+                onClick={() => !loading && analyzePath(name)}
+              >
+                {name}
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       <div className="main">
         <div className="chat-window">
-          {messages.map((msg, i) => (
+          {messages.map((msg, i) =>
             msg.role === 'system' ? (
               <div key={i} className="system-text">{msg.text}</div>
             ) : (
@@ -153,25 +183,34 @@ function App() {
                 </div>
               </div>
             )
-          ))}
-          {loading && <div className="system-text loading-text">Analyzing<span className="dots" /></div>}
+          )}
+          {loading && (
+            <div className="system-text loading-text">
+              Analyzing<span className="dots" />
+            </div>
+          )}
           <div ref={chatEndRef} />
         </div>
 
         <div className="input-area">
-          <label className="upload-btn">
+          <label className="upload-btn" title="Upload PCAP">
             +
-            <input type="file" accept=".pcap,.pcapng,.cap" onChange={handleFileChange} style={{ display: 'none' }} />
+            <input
+              type="file"
+              accept=".pcap,.pcapng,.cap"
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+            />
           </label>
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder={evidence ? 'Ask a follow-up question...' : 'Type a PCAP path or upload a file...'}
+            placeholder={evidence ? 'Ask a follow-up question…' : 'Type a PCAP filename or path…'}
             disabled={loading}
           />
-          <button onClick={handleSend} disabled={loading}>
-            {loading ? '...' : (evidence ? 'Ask' : 'Analyze')}
+          <button onClick={handleSend} disabled={loading || !input.trim()}>
+            {loading ? '…' : evidence ? 'Ask' : 'Analyze'}
           </button>
         </div>
       </div>
