@@ -2,6 +2,7 @@ from pathlib import Path
 import subprocess
 import json
 from collections import Counter, defaultdict
+import time
 
 from backend.ollama.service import analyze_evidence
 from backend.rag.pipeline import build_rag_index, query_rag_context
@@ -11,6 +12,15 @@ from backend.detection.detection import run_detections
 PROJECT_ROOT = Path(__file__).resolve().parent
 PCAP_DIR = PROJECT_ROOT / "pcaps"
 LOG_BASE_DIR = PROJECT_ROOT / "logs"
+
+
+def timed_step(step_name, func, *args, **kwargs):
+    start = time.perf_counter()
+    result = func(*args, **kwargs)
+    end = time.perf_counter()
+    elapsed = end - start
+    print(f"[TIME] {step_name}: {elapsed:.2f} seconds")
+    return result, elapsed
 
 
 def list_pcap_files():
@@ -321,6 +331,8 @@ def ask_user_question():
 
 
 def main():
+    app_start = time.perf_counter()
+
     print("=== PacketIQ CLI ===")
 
     pcaps = list_pcap_files()
@@ -330,10 +342,11 @@ def main():
         return
 
     log_dir = get_log_dir(selected_pcap)
-    success = run_zeek_on_pcap(selected_pcap, log_dir)
+    success, zeek_time = timed_step("Zeek parsing", run_zeek_on_pcap, selected_pcap, log_dir)
     if not success:
         return
 
+    detection_time = 0.0
     detection_results = None
     conn_log_path = log_dir / "conn.log"
     if conn_log_path.exists():
@@ -341,14 +354,16 @@ def main():
         try:
             output_path = PROJECT_ROOT / "output" / "detection.json"
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            detection_results = run_detections(str(conn_log_path), str(output_path))
+            detection_results, detection_time = timed_step(
+                "Detection", run_detections, str(conn_log_path), str(output_path)
+            )
         except Exception as e:
             print(f"Detection failed: {e}")
 
     print("\n=== BUILDING RAG INDEX ===")
-    vectorstore = build_rag_index(log_dir, detection_results)
+    vectorstore, rag_time = timed_step("RAG index build", build_rag_index, log_dir, detection_results)
 
-    evidence = summarize_logs(log_dir)
+    evidence, summary_time = timed_step("Log summarization", summarize_logs, log_dir)
 
     print("\n=== PARSED SUMMARY ===\n")
     print(evidence)
@@ -356,12 +371,22 @@ def main():
     user_question = ask_user_question()
 
     print("\n=== OLLAMA ANALYSIS ===\n")
+    ollama_time = 0.0
     try:
         rag_context = query_rag_context(vectorstore, user_question)
-        answer = analyze_evidence(user_question, rag_context)
+        answer, ollama_time = timed_step("Ollama analysis", analyze_evidence, user_question, evidence, rag_context)
         print(answer)
     except Exception as e:
         print(f"Ollama analysis failed: {e}")
+
+    total_app_time = time.perf_counter() - app_start
+    print("\n=== PROCESSING TIME SUMMARY ===")
+    print(f"Zeek parsing:       {zeek_time:.2f} seconds")
+    print(f"Detection:          {detection_time:.2f} seconds")
+    print(f"RAG index build:    {rag_time:.2f} seconds")
+    print(f"Log summarization:  {summary_time:.2f} seconds")
+    print(f"Ollama analysis:    {ollama_time:.2f} seconds")
+    print(f"Total runtime:      {total_app_time:.2f} seconds")
 
 
 if __name__ == "__main__":

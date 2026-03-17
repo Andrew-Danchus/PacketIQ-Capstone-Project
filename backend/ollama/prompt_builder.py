@@ -1,12 +1,13 @@
-def build_analysis_prompt(question: str, evidence: str) -> str:
+def build_analysis_prompt(question: str, summary: str, rag_context: str) -> str:
     return f"""
-You are a network forensics analyst.
-
 User Question:
 {question}
 
-Zeek Evidence:
-{evidence}
+Statistical Summary:
+{summary}
+
+Retrieved Log Records:
+{rag_context}
 
 Instructions:
 1. Answer the user's question directly and specifically.

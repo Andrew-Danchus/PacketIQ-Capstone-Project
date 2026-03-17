@@ -3,8 +3,8 @@ from .prompt_builder import build_analysis_prompt
 
 client = OllamaClient()
 
-def analyze_evidence(question: str, evidence: str) -> str:
-    prompt = build_analysis_prompt(question, evidence)
+def analyze_evidence(question: str, summary: str, rag_context: str) -> str:
+    prompt = build_analysis_prompt(question, summary, rag_context)
 
     messages = [
         {
