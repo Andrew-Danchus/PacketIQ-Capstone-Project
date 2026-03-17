@@ -2,13 +2,22 @@ from pathlib import Path
 import subprocess
 import json
 from collections import Counter, defaultdict
-
+import time
 from backend.ollama.service import analyze_evidence
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 PCAP_DIR = PROJECT_ROOT / "pcaps"
 LOG_DIR = PROJECT_ROOT / "logs"
+
+
+def timed_step(step_name, func, *args, **kwargs):
+    start = time.perf_counter()
+    result = func(*args, **kwargs)
+    end = time.perf_counter()
+    elapsed = end - start
+    print(f"[TIME] {step_name}: {elapsed:.2f} seconds")
+    return result, elapsed
 
 
 def list_pcap_files():
@@ -320,17 +329,19 @@ def ask_next_action():
 
 
 def analyze_single_pcap():
+    pcap_total_start = time.perf_counter()
+
     pcaps = list_pcap_files()
     selected_pcap = choose_pcap_file(pcaps)
 
     if not selected_pcap:
         return "exit"
 
-    success = run_zeek_on_pcap(selected_pcap)
+    success, zeek_time = timed_step("Zeek parsing", run_zeek_on_pcap, selected_pcap)
     if not success:
         return "repeat_pcap"
 
-    evidence = summarize_logs()
+    evidence, summary_time = timed_step("Log summarization", summarize_logs)
 
     print("\n=== PARSED SUMMARY ===\n")
     print(evidence)
@@ -338,10 +349,16 @@ def analyze_single_pcap():
     while True:
         user_question = ask_user_question()
 
-        print("\n=== OLLAMA ANALYSIS ===\n")
+        print("\n=== ANALYSIS ===\n")
         try:
-            answer = analyze_evidence(user_question, evidence)
+            answer, ollama_time = timed_step(
+                "Ollama analysis",
+                analyze_evidence,
+                user_question,
+                evidence
+            )
             print(answer)
+            print(f"\n[TIME] Question processing total: {ollama_time:.2f} seconds")
         except Exception as e:
             print(f"Ollama analysis failed: {e}")
 
@@ -350,11 +367,24 @@ def analyze_single_pcap():
         if next_action == "1":
             continue
         if next_action == "2":
+            total_pcap_time = time.perf_counter() - pcap_total_start
+            print("\n=== PCAP PROCESSING SUMMARY ===")
+            print(f"Zeek parsing:       {zeek_time:.2f} seconds")
+            print(f"Log summarization:  {summary_time:.2f} seconds")
+            print(f"Total PCAP session: {total_pcap_time:.2f} seconds")
             return "new_pcap"
+
+        total_pcap_time = time.perf_counter() - pcap_total_start
+        print("\n=== PCAP PROCESSING SUMMARY ===")
+        print(f"Zeek parsing:       {zeek_time:.2f} seconds")
+        print(f"Log summarization:  {summary_time:.2f} seconds")
+        print(f"Total PCAP session: {total_pcap_time:.2f} seconds")
         return "exit"
 
 
 def main():
+    app_start = time.perf_counter()
+
     print("=== PacketIQ CLI ===")
 
     while True:
@@ -366,6 +396,8 @@ def main():
             continue
         break
 
+    total_app_time = time.perf_counter() - app_start
+    print(f"\n[TIME] Total application runtime: {total_app_time:.2f} seconds")
     print("\nExiting PacketIQ CLI.")
 
 
