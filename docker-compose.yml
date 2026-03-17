@@ -4,39 +4,58 @@ services:
       context: .
       dockerfile: backend/Dockerfile
 
-    # Keep the container running so "docker compose exec backend bash" works
     command: ["bash", "-lc", "sleep infinity"]
     stdin_open: true
     tty: true
 
-    # Mount your local zeek-project folders into the container
     volumes:
       - ./pcaps:/data/pcaps
       - ./logs:/data/logs
       - ./scripts:/data/scripts
       - ./output:/data/output
 
-    # Optional: only needed if you later run an API on 8000
     ports:
       - "8000:8000"
+
     depends_on:
       - db
+      - ollama
+
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/packetiq
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3.2
+      OLLAMA_TIMEOUT: "120"
+      OLLAMA_NUM_CTX: "2048"
 
   db:
     image: pgvector/pgvector:pg16
     container_name: packetiq_db
     restart: unless-stopped
+
     environment:
       POSTGRES_DB: packetiq
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+
     ports:
       - "5432:5432"
+
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
 
+  ollama:
+    image: ollama/ollama
+    container_name: packetiq_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    volumes:
+      - ollama_data:/root/.ollama
+
 volumes:
   postgres_data:
+  ollama_data:
