@@ -1,17 +1,27 @@
 from pathlib import Path
 import subprocess
 import json
-import uuid
-import os
 from collections import Counter, defaultdict
+import time
 
-from backend.db.ingest_logs import ingest_job_logs
 from backend.ollama.service import analyze_evidence
+from backend.rag.pipeline import build_rag_index, query_rag_context
+from backend.detection.detection import run_detections
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-PCAP_DIR = Path(os.getenv("PCAP_DIR", "/data/pcaps"))
-LOG_DIR = Path(os.getenv("LOG_DIR", "/data/logs"))
+PCAP_DIR = PROJECT_ROOT / "pcaps"
+LOG_BASE_DIR = PROJECT_ROOT / "logs"
+
+
+def timed_step(step_name, func, *args, **kwargs):
+    start = time.perf_counter()
+    result = func(*args, **kwargs)
+    end = time.perf_counter()
+    elapsed = end - start
+    print(f"[TIME] {step_name}: {elapsed:.2f} seconds")
+    return result, elapsed
+
 
 def list_pcap_files():
     if not PCAP_DIR.exists():
@@ -48,29 +58,45 @@ def choose_pcap_file(pcaps):
         print("Choice out of range.")
 
 
-def clear_logs_folder():
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-    for file in LOG_DIR.iterdir():
-        if file.is_file():
-            try:
-                file.unlink()
-            except Exception as e:
-                print(f"Could not delete {file.name}: {e}")
+def get_log_dir(pcap_path: Path) -> Path:
+    """Return the log directory for the given PCAP (logs/<pcap_stem>/)."""
+    return LOG_BASE_DIR / pcap_path.stem
 
 
-def run_zeek_on_pcap(pcap_path: Path):
-    clear_logs_folder()
+def logs_exist(log_dir: Path) -> bool:
+    """Return True if the per-PCAP log directory already contains .log files."""
+    return log_dir.is_dir() and any(log_dir.glob("*.log"))
+
+
+def run_zeek_on_pcap(pcap_path: Path, log_dir: Path) -> bool:
+    """
+    Run Zeek on the given PCAP and write logs to log_dir.
+    If log_dir already contains .log files, skip parsing and use the cached logs.
+    """
+    if logs_exist(log_dir):
+        print(f"\nCached logs found for '{pcap_path.name}' — skipping Zeek parse.")
+        print(f"Loading logs from: {log_dir}\n")
+        for log_file in sorted(log_dir.glob("*.log")):
+            print(f"- {log_file.name} ({log_file.stat().st_size} bytes)")
+        return True
+
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\nRunning Zeek on: {pcap_path.name}")
     print("This may take a moment...\n")
 
+    project_root_str = str(PROJECT_ROOT).replace("\\", "/")
+    log_dir_in_container = f"/zeek/logs/{pcap_path.stem}"
+
     cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{project_root_str}:/zeek",
+        "zeek/zeek",
         "zeek",
         "-C",
-        "-r", str(pcap_path),
+        "-r", f"/zeek/pcaps/{pcap_path.name}",
         "LogAscii::use_json=T",
-        f"Log::default_logdir={LOG_DIR}"
+        f"Log::default_logdir={log_dir_in_container}"
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -80,7 +106,7 @@ def run_zeek_on_pcap(pcap_path: Path):
         print(result.stderr)
         return False
 
-    log_files = sorted(LOG_DIR.glob("*.log"))
+    log_files = sorted(log_dir.glob("*.log"))
     if not log_files:
         print("Zeek finished, but no .log files were found in the logs folder.")
         return False
@@ -91,6 +117,7 @@ def run_zeek_on_pcap(pcap_path: Path):
         print(f"- {log_file.name} ({log_file.stat().st_size} bytes)")
 
     return True
+
 
 def load_json_log(file_path: Path):
     records = []
@@ -112,12 +139,12 @@ def load_json_log(file_path: Path):
     return records
 
 
-def summarize_logs():
-    conn_log = LOG_DIR / "conn.log"
-    weird_log = LOG_DIR / "weird.log"
-    packet_filter_log = LOG_DIR / "packet_filter.log"
-    dns_log = LOG_DIR / "dns.log"
-    notice_log = LOG_DIR / "notice.log"
+def summarize_logs(log_dir: Path):
+    conn_log = log_dir / "conn.log"
+    weird_log = log_dir / "weird.log"
+    packet_filter_log = log_dir / "packet_filter.log"
+    dns_log = log_dir / "dns.log"
+    notice_log = log_dir / "notice.log"
 
     conn_records = load_json_log(conn_log)
     weird_records = load_json_log(weird_log)
@@ -248,6 +275,7 @@ def summarize_logs():
     else:
         summary.append("- None")
 
+    # Add a short suspicious-pattern section for Ollama
     summary.append("\nPotential indicators observed:")
     indicators_added = False
 
@@ -302,74 +330,63 @@ def ask_user_question():
     return question
 
 
-def ask_next_action():
-    print("\nWhat would you like to do next?")
-    print("1. Ask another question about this same PCAP")
-    print("2. Analyze a different PCAP")
-    print("3. Exit")
+def main():
+    app_start = time.perf_counter()
 
-    while True:
-        choice = input("\nEnter 1, 2, or 3: ").strip()
-        if choice in {"1", "2", "3"}:
-            return choice
-        print("Please enter 1, 2, or 3.")
+    print("=== PacketIQ CLI ===")
 
-
-def analyze_single_pcap():
     pcaps = list_pcap_files()
     selected_pcap = choose_pcap_file(pcaps)
 
     if not selected_pcap:
-        return "exit"
+        return
 
-    success = run_zeek_on_pcap(selected_pcap)
+    log_dir = get_log_dir(selected_pcap)
+    success, zeek_time = timed_step("Zeek parsing", run_zeek_on_pcap, selected_pcap, log_dir)
     if not success:
-        return "repeat_pcap"
-    job_id = str(uuid.uuid4())
-    try:
-        ingest_job_logs(job_id=job_id, filename=selected_pcap.name, file_size_bytes=selected_pcap.stat().st_size, log_dir=LOG_DIR, dsn=os.getenv("DATABASE_URL"))
-        print(f"\nLogs ingested into database with ID: {job_id}")
+        return
 
-    except Exception as e:
-        print(f"Error ingesting logs: {e}")
+    detection_time = 0.0
+    detection_results = None
+    conn_log_path = log_dir / "conn.log"
+    if conn_log_path.exists():
+        print("\n=== RUNNING DETECTIONS ===")
+        try:
+            output_path = PROJECT_ROOT / "output" / "detection.json"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            detection_results, detection_time = timed_step(
+                "Detection", run_detections, str(conn_log_path), str(output_path)
+            )
+        except Exception as e:
+            print(f"Detection failed: {e}")
 
-    evidence = summarize_logs()
+    print("\n=== BUILDING RAG INDEX ===")
+    vectorstore, rag_time = timed_step("RAG index build", build_rag_index, log_dir, detection_results)
+
+    evidence, summary_time = timed_step("Log summarization", summarize_logs, log_dir)
 
     print("\n=== PARSED SUMMARY ===\n")
     print(evidence)
 
-    while True:
-        user_question = ask_user_question()
+    user_question = ask_user_question()
 
-        print("\n=== OLLAMA ANALYSIS ===\n")
-        try:
-            answer = analyze_evidence(user_question, evidence)
-            print(answer)
-        except Exception as e:
-            print(f"Ollama analysis failed: {e}")
+    print("\n=== OLLAMA ANALYSIS ===\n")
+    ollama_time = 0.0
+    try:
+        rag_context = query_rag_context(vectorstore, user_question)
+        answer, ollama_time = timed_step("Ollama analysis", analyze_evidence, user_question, evidence, rag_context)
+        print(answer)
+    except Exception as e:
+        print(f"Ollama analysis failed: {e}")
 
-        next_action = ask_next_action()
-
-        if next_action == "1":
-            continue
-        if next_action == "2":
-            return "new_pcap"
-        return "exit"
-
-
-def main():
-    print("=== PacketIQ CLI ===")
-
-    while True:
-        result = analyze_single_pcap()
-
-        if result == "new_pcap":
-            continue
-        if result == "repeat_pcap":
-            continue
-        break
-
-    print("\nExiting PacketIQ CLI.")
+    total_app_time = time.perf_counter() - app_start
+    print("\n=== PROCESSING TIME SUMMARY ===")
+    print(f"Zeek parsing:       {zeek_time:.2f} seconds")
+    print(f"Detection:          {detection_time:.2f} seconds")
+    print(f"RAG index build:    {rag_time:.2f} seconds")
+    print(f"Log summarization:  {summary_time:.2f} seconds")
+    print(f"Ollama analysis:    {ollama_time:.2f} seconds")
+    print(f"Total runtime:      {total_app_time:.2f} seconds")
 
 
 if __name__ == "__main__":
