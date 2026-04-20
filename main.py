@@ -92,30 +92,23 @@ def logs_exist(log_dir: Path) -> bool:
     return log_dir.is_dir() and any(log_dir.glob("*.log"))
 
 
-def run_zeek_on_pcap(pcap_path: Path, log_dir: Path) -> bool:
-    """
-    Run Zeek on the given PCAP and write logs to log_dir.
-    If log_dir already contains .log files, skip parsing and use the cached logs.
-    Assumes Zeek is installed in the current environment/container.
-    """
-    if logs_exist(log_dir):
-        print(f"\nCached logs found for '{pcap_path.name}' — skipping Zeek parse.")
-        print(f"Loading logs from: {log_dir}\n")
-        for log_file in sorted(log_dir.glob("*.log")):
-            print(f"- {log_file.name} ({log_file.stat().st_size} bytes)")
-        return True
+def run_zeek_on_pcap(pcap_path, log_dir):
+    import subprocess
+    from pathlib import Path
 
+    project_root = Path(__file__).resolve().parent
+
+    pcap_name = pcap_path.name
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\nRunning Zeek on: {pcap_path.name}")
-    print("This may take a moment...\n")
-
     cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{project_root}:/zeek",
+        "zeek/zeek:latest",
         "zeek",
         "-C",
-        "-r", str(pcap_path),
-        "LogAscii::use_json=T",
-        f"Log::default_logdir={log_dir}",
+        "-r", f"/zeek/pcaps/{pcap_name}",
+        f"Log::default_logdir=/zeek/{log_dir.relative_to(project_root).as_posix()}"
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -124,16 +117,6 @@ def run_zeek_on_pcap(pcap_path: Path, log_dir: Path) -> bool:
         print("Zeek failed.")
         print(result.stderr)
         return False
-
-    log_files = sorted(log_dir.glob("*.log"))
-    if not log_files:
-        print("Zeek finished, but no .log files were found in the logs folder.")
-        return False
-
-    print("Zeek parsing complete.\n")
-    print("Generated log files:")
-    for log_file in log_files:
-        print(f"- {log_file.name} ({log_file.stat().st_size} bytes)")
 
     return True
 def load_json_log(file_path: Path):
