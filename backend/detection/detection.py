@@ -371,7 +371,10 @@ def run_detections(
 
     _print_summary(results)
     save_to_json(results, output_path)
+    print("DEBUG: total conn records:", len(records))
 
+    ports = [get_dst_port(r) for r in records]
+    print("DEBUG: port 22 count:", ports.count(22))
     return results
 
 

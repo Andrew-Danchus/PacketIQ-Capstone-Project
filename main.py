@@ -95,20 +95,19 @@ def logs_exist(log_dir: Path) -> bool:
 
 def run_zeek_on_pcap(pcap_path: Path, log_dir: Path) -> bool:
     log_dir.mkdir(parents=True, exist_ok=True)
+    project_root = Path(__file__).resolve().parent
 
-    # If running inside Docker backend container, use Zeek directly
     if Path("/.dockerenv").exists():
         cmd = [
             "zeek",
             "-C",
             "-r",
             str(pcap_path),
+            "LogAscii::use_json=T",
             f"Log::default_logdir={str(log_dir)}",
         ]
 
-    # If running locally on Windows and Docker is installed, use Docker
     elif shutil.which("docker"):
-        project_root = Path(__file__).resolve().parent
         cmd = [
             "docker",
             "run",
@@ -120,6 +119,7 @@ def run_zeek_on_pcap(pcap_path: Path, log_dir: Path) -> bool:
             "-C",
             "-r",
             f"/zeek/pcaps/{pcap_path.name}",
+            "LogAscii::use_json=T",
             f"Log::default_logdir=/zeek/logs/{pcap_path.stem}",
         ]
 
@@ -416,6 +416,7 @@ def main():
     print(f"Log summarization:  {summary_time:.2f} seconds")
     print(f"Ollama analysis:    {ollama_time:.2f} seconds")
     print(f"Total runtime:      {total_app_time:.2f} seconds")
+
 
 
 if __name__ == "__main__":

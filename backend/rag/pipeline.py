@@ -19,22 +19,25 @@ def embed_texts(texts: list[str], batch_size: int = 200) -> list[list[float]]:
 
     all_embeddings = []
 
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i:i + batch_size]
-
+    for text in texts:
         resp = requests.post(
-            f"{OLLAMA_BASE_URL}/api/embed",
+            f"{OLLAMA_BASE_URL}/api/embeddings",
             json={
                 "model": EMBED_MODEL,
-                "input": batch,
-                "truncate": True,
+                "prompt": text,
             },
             timeout=300,
         )
+
+        if resp.status_code != 200:
+            print("DEBUG: embedding failed")
+            print("DEBUG: status =", resp.status_code)
+            print("DEBUG: response =", resp.text)
+
         resp.raise_for_status()
         data = resp.json()
 
-        all_embeddings.extend(data["embeddings"])
+        all_embeddings.append(data["embedding"])
 
     return all_embeddings
 
