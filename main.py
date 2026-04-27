@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 import time
 import os
 import uuid
+import shutil
 
 from backend.db.ingest_logs import ingest_job_logs
 from backend.ollama.service import analyze_evidence
@@ -92,31 +93,53 @@ def logs_exist(log_dir: Path) -> bool:
     return log_dir.is_dir() and any(log_dir.glob("*.log"))
 
 
-def run_zeek_on_pcap(pcap_path, log_dir):
-    import subprocess
-    from pathlib import Path
-
-    project_root = Path(__file__).resolve().parent
-
-    pcap_name = pcap_path.name
+def run_zeek_on_pcap(pcap_path: Path, log_dir: Path) -> bool:
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{project_root}:/zeek",
-        "zeek/zeek:latest",
-        "zeek",
-        "-C",
-        "-r", f"/zeek/pcaps/{pcap_name}",
-        f"Log::default_logdir=/zeek/{log_dir.relative_to(project_root).as_posix()}"
-    ]
+    # If running inside Docker backend container, use Zeek directly
+    if Path("/.dockerenv").exists():
+        cmd = [
+            "zeek",
+            "-C",
+            "-r",
+            str(pcap_path),
+            f"Log::default_logdir={str(log_dir)}",
+        ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    # If running locally on Windows and Docker is installed, use Docker
+    elif shutil.which("docker"):
+        project_root = Path(__file__).resolve().parent
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{project_root}:/zeek",
+            "zeek/zeek:latest",
+            "zeek",
+            "-C",
+            "-r",
+            f"/zeek/pcaps/{pcap_path.name}",
+            f"Log::default_logdir=/zeek/logs/{pcap_path.stem}",
+        ]
+
+    else:
+        raise RuntimeError("Neither zeek nor docker was found.")
+
+    print("DEBUG: running command:", " ".join(cmd))
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    print("DEBUG: zeek stdout:", result.stdout)
+    print("DEBUG: zeek stderr:", result.stderr)
 
     if result.returncode != 0:
-        print("Zeek failed.")
-        print(result.stderr)
-        return False
+        raise RuntimeError(f"Zeek failed: {result.stderr}")
 
     return True
 def load_json_log(file_path: Path):

@@ -1,24 +1,13 @@
 {
-  "generated_at": "2026-04-07T22:08:35.998955+00:00",
+  "generated_at": "2026-04-27T21:56:39.042125+00:00",
   "summary": {
     "port_scans": 0,
-    "ddos": 1,
+    "ddos": 0,
     "brute_force": 0
   },
   "detections": {
     "port_scans": [],
-    "ddos": [
-      {
-        "type": "ddos",
-        "dst_ip": "192.168.1.90",
-        "unique_src_ips": 1,
-        "total_connections": 200,
-        "total_bytes": 18448,
-        "window_secs": 60.0,
-        "first_seen_ts": 101328.132085,
-        "last_seen_ts": 101328.494829
-      }
-    ],
+    "ddos": [],
     "brute_force": []
   }
 }
