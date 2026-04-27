@@ -14,3 +14,5 @@ __pycache__/
 logs/
 output/
 pcaps/
+
+output/detection.json
