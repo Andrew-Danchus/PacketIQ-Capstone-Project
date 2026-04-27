@@ -1,9 +1,10 @@
 {
-  "generated_at": "2026-04-27T21:56:39.042125+00:00",
+  "generated_at": "2026-04-27T22:13:25.246839+00:00",
   "summary": {
     "port_scans": 0,
     "ddos": 0,
-    "brute_force": 0
+    "brute_force": 0,
+    "total": 0
   },
   "detections": {
     "port_scans": [],

@@ -1,9 +1,15 @@
 """
+PacketIQ detection.py
+
 Analyzes Zeek JSON logs to detect:
-  1. Port Scans
-  2. DDoS Attacks
-  3. Brute Force Attacks (conn.log — TCP-layer failures)
-  4. SSH Brute Force    (ssh.log  — application-layer auth failures)
+  1. Port scans
+  2. DDoS / high-volume traffic
+  3. Brute force attempts
+  4. SSH brute force from ssh.log when available
+
+This version is less strict for SSH brute force because many SSH login attempts
+show as conn_state="SF" in conn.log, meaning the TCP connection succeeded even
+though authentication may have failed.
 """
 
 import json
@@ -11,333 +17,383 @@ import datetime
 from collections import defaultdict
 from pathlib import Path
 
+
 # ─── Thresholds ───────────────────────────────────────────────────────────────
-PORT_SCAN_UNIQUE_PORTS   = 15    # distinct dst ports from one src in the window
-PORT_SCAN_UNIQUE_HOSTS   = 10    # distinct dst hosts from one src in the window
-PORT_SCAN_WINDOW_SECS    = 60.0
 
-DDOS_MIN_SRC_IPS         = 50    # distinct source IPs hammering one target
-DDOS_MIN_CONNECTIONS     = 200   # total connections to one target
-DDOS_WINDOW_SECS         = 60.0
+PORT_SCAN_UNIQUE_PORTS = 15
+PORT_SCAN_UNIQUE_HOSTS = 10
+PORT_SCAN_WINDOW_SECS = 60.0
 
-BRUTE_FORCE_MIN_ATTEMPTS = 10    # failed attempts from one src to same dst:port
-BRUTE_FORCE_PORTS        = {22, 21, 23, 25, 110, 143, 3389, 5900}  # SSH/FTP/Telnet/RDP/VNC/Mail
-BRUTE_FORCE_WINDOW_SECS  = 120.0
+DDOS_MIN_SRC_IPS = 50
+DDOS_MIN_CONNECTIONS = 200
+DDOS_WINDOW_SECS = 60.0
 
-# Zeek conn_state values that indicate a rejected / failed connection
-FAILED_STATES = {"S0", "REJ", "RSTOS0", "RSTRH", "SH", "SHR", "OTH"}
+BRUTE_FORCE_MIN_ATTEMPTS = 5
+BRUTE_FORCE_PORTS = {22, 21, 23, 25, 110, 143, 3389, 5900}
+BRUTE_FORCE_WINDOW_SECS = 120.0
+
+FAILED_STATES = {
+    "S0",
+    "REJ",
+    "RSTO",
+    "RSTR",
+    "RSTOS0",
+    "RSTRH",
+    "SH",
+    "SHR",
+    "OTH",
+}
 
 
-#  Log Loaders
+# ─── Log Loaders ──────────────────────────────────────────────────────────────
 
-def load_conn_log(path: str) -> list[dict]:
-    """Read a Zeek conn.log (JSON format) and return a list of record dicts."""
+def load_json_log(path: str) -> list[dict]:
     records = []
-    with open(path, "r") as fh:
+
+    if not path or not Path(path).exists():
+        print(f"WARNING: log file not found: {path}")
+        return records
+
+    with open(path, "r", encoding="utf-8", errors="ignore") as fh:
         for line in fh:
             line = line.strip()
+
             if not line or line.startswith("#"):
                 continue
+
             try:
                 records.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
+
     return records
 
 
-def load_ssh_log(path: str) -> list[dict]:
-    """Read a Zeek ssh.log (JSON format) and return a list of record dicts."""
-    records = []
-    with open(path, "r") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return records
+def safe_int(value, default=0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
-#  1. Port Scan Detection 
+def safe_float(value, default=0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def get_src(record: dict):
+    return record.get("id.orig_h") or record.get("orig_h")
+
+
+def get_dst(record: dict):
+    return record.get("id.resp_h") or record.get("resp_h")
+
+
+def get_dst_port(record: dict) -> int:
+    return safe_int(record.get("id.resp_p") or record.get("resp_p"), 0)
+
+
+def get_ts(record: dict) -> float:
+    return safe_float(record.get("ts"), 0.0)
+
+
+# ─── 1. Port Scan Detection ───────────────────────────────────────────────────
 
 def detect_port_scans(records: list[dict]) -> list[dict]:
-    """
-    Flag source IPs that contact an unusual number of distinct destination
-    ports or destination hosts within a rolling time window.
-
-    Returns a list of alert dicts, one per offending source IP.
-    """
     alerts = []
+    by_src = defaultdict(list)
 
-    # Group all records by source IP
-    by_src: dict[str, list[dict]] = defaultdict(list)
-    for r in records:
-        src = r.get("id.orig_h") or r.get("orig_h")
+    for record in records:
+        src = get_src(record)
         if src:
-            by_src[src].append(r)
+            by_src[src].append(record)
 
     for src_ip, conns in by_src.items():
-        # Sort by timestamp so we can slide a time window
-        conns.sort(key=lambda r: float(r.get("ts", 0)))
-
+        conns.sort(key=get_ts)
         window_start = 0
-        for i, conn in enumerate(conns):
-            ts = float(conn.get("ts", 0))
 
-            # Advance window start to keep within the window
-            while float(conns[window_start].get("ts", 0)) < ts - PORT_SCAN_WINDOW_SECS:
+        for i, conn in enumerate(conns):
+            ts = get_ts(conn)
+
+            while window_start < i and get_ts(conns[window_start]) < ts - PORT_SCAN_WINDOW_SECS:
                 window_start += 1
 
-            window = conns[window_start : i + 1]
-            dst_ports = {int(r.get("id.resp_p") or r.get("resp_p", 0)) for r in window}
-            dst_hosts = {r.get("id.resp_h") or r.get("resp_h") for r in window}
+            window = conns[window_start:i + 1]
 
-            if (len(dst_ports) >= PORT_SCAN_UNIQUE_PORTS or
-                    len(dst_hosts) >= PORT_SCAN_UNIQUE_HOSTS):
+            dst_ports = {
+                get_dst_port(r)
+                for r in window
+                if get_dst_port(r) > 0
+            }
+
+            dst_hosts = {
+                get_dst(r)
+                for r in window
+                if get_dst(r)
+            }
+
+            if len(dst_ports) >= PORT_SCAN_UNIQUE_PORTS or len(dst_hosts) >= PORT_SCAN_UNIQUE_HOSTS:
                 alerts.append({
-                    "type":          "port_scan",
-                    "src_ip":        src_ip,
-                    "unique_ports":  len(dst_ports),
-                    "unique_hosts":  len(dst_hosts),
-                    "window_secs":   PORT_SCAN_WINDOW_SECS,
-                    "first_seen_ts": float(conns[window_start].get("ts", 0)),
-                    "last_seen_ts":  ts,
-                    "sample_ports":  sorted(dst_ports)[:20],
+                    "type": "port_scan",
+                    "severity": "medium",
+                    "src_ip": src_ip,
+                    "unique_ports": len(dst_ports),
+                    "unique_hosts": len(dst_hosts),
+                    "window_secs": PORT_SCAN_WINDOW_SECS,
+                    "first_seen_ts": get_ts(conns[window_start]),
+                    "last_seen_ts": ts,
+                    "sample_ports": sorted(dst_ports)[:20],
+                    "evidence": (
+                        f"{src_ip} contacted {len(dst_ports)} unique ports "
+                        f"and {len(dst_hosts)} unique hosts within {PORT_SCAN_WINDOW_SECS} seconds."
+                    ),
                 })
-                break  # one alert per source IP is enough
+                break
 
     return alerts
 
 
-#  2. DDoS Detection
+# ─── 2. DDoS Detection ────────────────────────────────────────────────────────
 
 def detect_ddos(records: list[dict]) -> list[dict]:
-    """
-    Flag destination IPs that receive connections from an unusually large
-    number of distinct source IPs within a rolling time window (volumetric DDoS).
-
-    Returns a list of alert dicts, one per targeted destination IP.
-    """
     alerts = []
+    by_dst = defaultdict(list)
 
-    # Group all records by destination IP
-    by_dst: dict[str, list[dict]] = defaultdict(list)
-    for r in records:
-        dst = r.get("id.resp_h") or r.get("resp_h")
+    for record in records:
+        dst = get_dst(record)
         if dst:
-            by_dst[dst].append(r)
+            by_dst[dst].append(record)
 
     for dst_ip, conns in by_dst.items():
-        conns.sort(key=lambda r: float(r.get("ts", 0)))
-
+        conns.sort(key=get_ts)
         window_start = 0
-        for i, conn in enumerate(conns):
-            ts = float(conn.get("ts", 0))
 
-            while float(conns[window_start].get("ts", 0)) < ts - DDOS_WINDOW_SECS:
+        for i, conn in enumerate(conns):
+            ts = get_ts(conn)
+
+            while window_start < i and get_ts(conns[window_start]) < ts - DDOS_WINDOW_SECS:
                 window_start += 1
 
-            window = conns[window_start : i + 1]
-            src_ips = {r.get("id.orig_h") or r.get("orig_h") for r in window}
+            window = conns[window_start:i + 1]
 
-            if (len(src_ips) >= DDOS_MIN_SRC_IPS or
-                    len(window) >= DDOS_MIN_CONNECTIONS):
+            src_ips = {
+                get_src(r)
+                for r in window
+                if get_src(r)
+            }
+
+            if len(src_ips) >= DDOS_MIN_SRC_IPS or len(window) >= DDOS_MIN_CONNECTIONS:
                 total_bytes = sum(
-                    int(r.get("orig_bytes") or 0) + int(r.get("resp_bytes") or 0)
+                    safe_int(r.get("orig_bytes"), 0) + safe_int(r.get("resp_bytes"), 0)
                     for r in window
                 )
+
                 alerts.append({
-                    "type":             "ddos",
-                    "dst_ip":           dst_ip,
-                    "unique_src_ips":   len(src_ips),
+                    "type": "ddos",
+                    "severity": "high",
+                    "dst_ip": dst_ip,
+                    "unique_src_ips": len(src_ips),
                     "total_connections": len(window),
-                    "total_bytes":      total_bytes,
-                    "window_secs":      DDOS_WINDOW_SECS,
-                    "first_seen_ts":    float(conns[window_start].get("ts", 0)),
-                    "last_seen_ts":     ts,
+                    "total_bytes": total_bytes,
+                    "window_secs": DDOS_WINDOW_SECS,
+                    "first_seen_ts": get_ts(conns[window_start]),
+                    "last_seen_ts": ts,
+                    "evidence": (
+                        f"{dst_ip} received {len(window)} connections from "
+                        f"{len(src_ips)} unique source IPs within {DDOS_WINDOW_SECS} seconds."
+                    ),
                 })
-                break  # one alert per target IP
+                break
 
     return alerts
 
 
-#  3. Brute Force Detection
+# ─── 3. Brute Force Detection from conn.log ───────────────────────────────────
 
 def detect_brute_force(records: list[dict]) -> list[dict]:
-    """
-    Flag source IPs that make many failed connection attempts to the same
-    destination IP and port (e.g., SSH, RDP, FTP) in a rolling time window.
-
-    Returns a list of alert dicts, one per (src_ip, dst_ip, dst_port) triple.
-    """
     alerts = []
+    by_target = defaultdict(list)
 
-    # Group by (src_ip, dst_ip, dst_port) — only care about auth-related ports
-    by_target: dict[tuple, list[dict]] = defaultdict(list)
-    for r in records:
-        src  = r.get("id.orig_h") or r.get("orig_h")
-        dst  = r.get("id.resp_h") or r.get("resp_h")
-        port = int(r.get("id.resp_p") or r.get("resp_p", 0))
+    for record in records:
+        src = get_src(record)
+        dst = get_dst(record)
+        port = get_dst_port(record)
+
         if src and dst and port in BRUTE_FORCE_PORTS:
-            by_target[(src, dst, port)].append(r)
+            by_target[(src, dst, port)].append(record)
 
     for (src_ip, dst_ip, dst_port), conns in by_target.items():
-        conns.sort(key=lambda r: float(r.get("ts", 0)))
+        total_attempts = len(conns)
 
-        window_start = 0
-        for i, conn in enumerate(conns):
-            ts = float(conn.get("ts", 0))
+        failed = [
+            r for r in conns
+            if r.get("conn_state") in FAILED_STATES
+        ]
 
-            while float(conns[window_start].get("ts", 0)) < ts - BRUTE_FORCE_WINDOW_SECS:
-                window_start += 1
-
-            window = conns[window_start : i + 1]
-            failed = [r for r in window if r.get("conn_state") in FAILED_STATES]
-
-            if len(failed) >= BRUTE_FORCE_MIN_ATTEMPTS:
-                alerts.append({
-                    "type":            "brute_force",
-                    "src_ip":          src_ip,
-                    "dst_ip":          dst_ip,
-                    "dst_port":        dst_port,
-                    "failed_attempts": len(failed),
-                    "total_attempts":  len(window),
-                    "window_secs":     BRUTE_FORCE_WINDOW_SECS,
-                    "first_seen_ts":   float(conns[window_start].get("ts", 0)),
-                    "last_seen_ts":    ts,
-                })
-                break  # one alert per (src, dst, port) triple
+        # KEY CHANGE:
+        # No time window — detect total behavior
+        if total_attempts >= 10:
+            alerts.append({
+                "type": "brute_force",
+                "severity": "high",
+                "src_ip": src_ip,
+                "dst_ip": dst_ip,
+                "dst_port": dst_port,
+                "failed_attempts": len(failed),
+                "total_attempts": total_attempts,
+                "reason": "High number of repeated connections (likely brute force)",
+                "evidence": (
+                    f"{src_ip} made {total_attempts} connections to "
+                    f"{dst_ip}:{dst_port}. {len(failed)} showed failed states."
+                ),
+                "recommendation": "Block source IP or enable rate limiting."
+            })
 
     return alerts
 
 
-#  4. SSH Brute Force Detection (ssh.log)
+# ─── 4. SSH Brute Force Detection from ssh.log ────────────────────────────────
 
 def detect_ssh_brute_force(ssh_records: list[dict]) -> list[dict]:
-    """
-    Detect SSH brute force using ssh.log rather than conn.log.
-
-    SSH brute force attacks that complete the TCP handshake before failing
-    auth appear as conn_state='SF' in conn.log — which is NOT a failed state,
-    so detect_brute_force() misses them entirely.  ssh.log exposes the
-    application-layer result via auth_success=false, making this the correct
-    detection method for paramiko-style credential stuffing attacks.
-
-    Groups records by (src_ip, dst_ip) and counts failed auth connections
-    within a rolling time window.  Also accumulates total auth_attempts
-    (each SSH connection can try several passwords before closing).
-    """
     alerts = []
+    by_target = defaultdict(list)
 
-    by_target: dict[tuple, list[dict]] = defaultdict(list)
-    for r in ssh_records:
-        src = r.get("id.orig_h")
-        dst = r.get("id.resp_h")
+    for record in ssh_records:
+        src = get_src(record)
+        dst = get_dst(record)
+
         if src and dst:
-            by_target[(src, dst)].append(r)
+            by_target[(src, dst)].append(record)
 
     for (src_ip, dst_ip), conns in by_target.items():
-        conns.sort(key=lambda r: float(r.get("ts", 0)))
-
+        conns.sort(key=get_ts)
         window_start = 0
-        for i, conn in enumerate(conns):
-            ts = float(conn.get("ts", 0))
 
-            while float(conns[window_start].get("ts", 0)) < ts - BRUTE_FORCE_WINDOW_SECS:
+        for i, conn in enumerate(conns):
+            ts = get_ts(conn)
+
+            while window_start < i and get_ts(conns[window_start]) < ts - BRUTE_FORCE_WINDOW_SECS:
                 window_start += 1
 
-            window = conns[window_start : i + 1]
-            failed = [r for r in window if r.get("auth_success") is False]
+            window = conns[window_start:i + 1]
 
-            if len(failed) >= BRUTE_FORCE_MIN_ATTEMPTS:
-                total_auth_attempts = sum(
-                    int(r.get("auth_attempts", 1)) for r in failed
-                )
-                ssh_client = failed[-1].get("client", "unknown")
+            failed = [
+                r for r in window
+                if r.get("auth_success") is False
+            ]
+
+            total_auth_attempts = sum(
+                safe_int(r.get("auth_attempts"), 1)
+                for r in failed
+            )
+
+            if len(failed) >= BRUTE_FORCE_MIN_ATTEMPTS or total_auth_attempts >= BRUTE_FORCE_MIN_ATTEMPTS:
+                ssh_client = failed[-1].get("client", "unknown") if failed else "unknown"
+
                 alerts.append({
-                    "type":                "brute_force",
-                    "subtype":             "ssh",
-                    "src_ip":              src_ip,
-                    "dst_ip":              dst_ip,
-                    "dst_port":            22,
-                    "failed_connections":  len(failed),
+                    "type": "brute_force",
+                    "subtype": "ssh",
+                    "severity": "high",
+                    "src_ip": src_ip,
+                    "dst_ip": dst_ip,
+                    "dst_port": 22,
+                    "failed_connections": len(failed),
+                    "failed_attempts": len(failed),
+                    "total_attempts": len(window),
                     "total_auth_attempts": total_auth_attempts,
-                    # kept as failed_attempts / total_attempts for _print_summary compat
-                    "failed_attempts":     len(failed),
-                    "total_attempts":      len(window),
-                    "window_secs":         BRUTE_FORCE_WINDOW_SECS,
-                    "first_seen_ts":       float(conns[window_start].get("ts", 0)),
-                    "last_seen_ts":        ts,
-                    "ssh_client":          ssh_client,
+                    "window_secs": BRUTE_FORCE_WINDOW_SECS,
+                    "first_seen_ts": get_ts(conns[window_start]),
+                    "last_seen_ts": ts,
+                    "ssh_client": ssh_client,
+                    "reason": "SSH authentication failures from ssh.log",
+                    "evidence": (
+                        f"{src_ip} made {len(failed)} failed SSH connections "
+                        f"with {total_auth_attempts} total auth attempts against {dst_ip}:22."
+                    ),
+                    "recommendation": (
+                        "Review SSH auth logs, block or rate-limit the source IP, "
+                        "disable password authentication, and require key-based authentication."
+                    ),
                 })
-                break  # one alert per (src, dst) pair
+                break
 
     return alerts
 
 
-#  Main Entry Point
+# ─── Main Entry Point ─────────────────────────────────────────────────────────
 
-def run_detections(conn_log_path: str = "conn.log",
-                   output_path: str = "detection.json",
-                   ssh_log_path: str = None) -> dict:
-    """
-    Load Zeek conn.log and run all detectors:
-      1. Port Scan
-      2. DDoS
-      3. Brute Force  (TCP-layer, via conn.log)
-      4. SSH Brute Force (application-layer, via ssh.log)
+def run_detections(
+    conn_log_path: str = "conn.log",
+    output_path: str = "detection.json",
+    ssh_log_path: str | None = None
+) -> dict:
+    print("\nRunning PacketIQ detections...")
+    print(f"DEBUG: conn_log_path = {conn_log_path}")
 
-    ssh.log is auto-discovered from the same directory as conn.log if
-    ssh_log_path is not provided explicitly — so existing callers need
-    no changes.
+    records = load_json_log(conn_log_path)
 
-    Saves results to `output_path` as JSON and returns the results dict.
-    """
-    records = load_conn_log(conn_log_path)
+    print(f"DEBUG: conn records loaded: {len(records)}")
+    if records:
+        print(f"DEBUG: first conn record: {records[0]}")
 
-    port_scan_alerts   = detect_port_scans(records)
-    ddos_alerts        = detect_ddos(records)
+    port_scan_alerts = detect_port_scans(records)
+    ddos_alerts = detect_ddos(records)
     brute_force_alerts = detect_brute_force(records)
 
-    # Auto-discover ssh.log from the same directory as conn.log
     if ssh_log_path is None:
         candidate = Path(conn_log_path).parent / "ssh.log"
         if candidate.exists():
             ssh_log_path = str(candidate)
 
+    print(f"DEBUG: ssh_log_path = {ssh_log_path}")
+
     if ssh_log_path and Path(ssh_log_path).exists():
-        print(f"\nSSH log found — running SSH brute force detection: {ssh_log_path}")
-        ssh_records = load_ssh_log(ssh_log_path)
-        ssh_bf_alerts = detect_ssh_brute_force(ssh_records)
-        brute_force_alerts.extend(ssh_bf_alerts)
-        print(f"  SSH brute force alerts: {len(ssh_bf_alerts)}")
+        ssh_records = load_json_log(ssh_log_path)
+
+        print(f"DEBUG: ssh records loaded: {len(ssh_records)}")
+        if ssh_records:
+            print(f"DEBUG: first ssh record: {ssh_records[0]}")
+
+        ssh_alerts = detect_ssh_brute_force(ssh_records)
+        brute_force_alerts.extend(ssh_alerts)
+
+        print(f"DEBUG: SSH brute force alerts: {len(ssh_alerts)}")
+    else:
+        print("DEBUG: ssh.log not found. Using conn.log brute force detection only.")
 
     results = {
-        "port_scans":  port_scan_alerts,
-        "ddos":        ddos_alerts,
+        "port_scans": port_scan_alerts,
+        "ddos": ddos_alerts,
         "brute_force": brute_force_alerts,
     }
 
     _print_summary(results)
     save_to_json(results, output_path)
+
     return results
 
 
 def save_to_json(results: dict, output_path: str = "detection.json") -> None:
-    """Serialize all detection results to a JSON file."""
     payload = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "summary": {
-            "port_scans":  len(results["port_scans"]),
-            "ddos":        len(results["ddos"]),
+            "port_scans": len(results["port_scans"]),
+            "ddos": len(results["ddos"]),
             "brute_force": len(results["brute_force"]),
+            "total": (
+                len(results["port_scans"])
+                + len(results["ddos"])
+                + len(results["brute_force"])
+            ),
         },
         "detections": results,
     }
-    with open(output_path, "w") as fh:
+
+    with open(output_path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2)
+
     print(f"Detection results saved -> {output_path}")
 
 
@@ -346,35 +402,49 @@ def _print_summary(results: dict) -> None:
     print("  PacketIQ Detection Report")
     print("=" * 50)
 
-    # Port Scans
     print(f"\n[1] Port Scan Detections: {len(results['port_scans'])}")
-    for a in results["port_scans"]:
-        print(f"    {a['src_ip']} → {a['unique_ports']} ports / "
-              f"{a['unique_hosts']} hosts in {a['window_secs']}s")
+    for alert in results["port_scans"]:
+        print(
+            f"    {alert['src_ip']} -> "
+            f"{alert['unique_ports']} ports / "
+            f"{alert['unique_hosts']} hosts in "
+            f"{alert['window_secs']}s"
+        )
 
-    # DDoS
     print(f"\n[2] DDoS Detections: {len(results['ddos'])}")
-    for a in results["ddos"]:
-        print(f"    Target: {a['dst_ip']} <- {a['unique_src_ips']} IPs, "
-              f"{a['total_connections']} conns, {a['total_bytes']} bytes "
-              f"in {a['window_secs']}s")
+    for alert in results["ddos"]:
+        print(
+            f"    Target {alert['dst_ip']} <- "
+            f"{alert['unique_src_ips']} IPs, "
+            f"{alert['total_connections']} connections, "
+            f"{alert['total_bytes']} bytes in "
+            f"{alert['window_secs']}s"
+        )
 
-    # Brute Force
     print(f"\n[3] Brute Force Detections: {len(results['brute_force'])}")
-    for a in results["brute_force"]:
-        line = (f"    {a['src_ip']} → {a['dst_ip']}:{a['dst_port']} — "
-                f"{a['failed_attempts']} failed / {a['total_attempts']} total "
-                f"in {a['window_secs']}s")
-        if a.get("subtype") == "ssh":
-            line += (f"  [SSH: {a['total_auth_attempts']} auth attempts"
-                     f", client: {a.get('ssh_client', 'unknown')}]")
-        print(line)
+    for alert in results["brute_force"]:
+        print(
+            f"    {alert['src_ip']} -> {alert['dst_ip']}:{alert['dst_port']} — "
+            f"{alert['failed_attempts']} failed / "
+            f"{alert['total_attempts']} total in "
+            f"{alert['window_secs']}s"
+        )
+
+        if alert.get("subtype") == "ssh":
+            print(
+                f"      SSH auth attempts: {alert.get('total_auth_attempts', 0)}, "
+                f"client: {alert.get('ssh_client', 'unknown')}"
+            )
+
+        print(f"      Reason: {alert.get('reason', 'N/A')}")
 
     print()
 
 
 if __name__ == "__main__":
     import sys
-    path = sys.argv[1] if len(sys.argv) > 1 else "conn.log"
-    out  = sys.argv[2] if len(sys.argv) > 2 else "detection.json"
-    run_detections(path, out)
+
+    conn_path = sys.argv[1] if len(sys.argv) > 1 else "conn.log"
+    out_path = sys.argv[2] if len(sys.argv) > 2 else "detection.json"
+
+    run_detections(conn_path, out_path)
