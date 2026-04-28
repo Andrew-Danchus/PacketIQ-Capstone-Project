@@ -29,8 +29,9 @@ echo Building and starting PacketIQ...
 docker compose up --build -d
 
 echo.
-echo Pulling Ollama model if needed...
+echo Pulling Ollama models if needed...
 docker compose exec ollama ollama pull llama3.2
+docker compose exec ollama ollama pull nomic-embed-text
 
 echo.
 echo PacketIQ is running.

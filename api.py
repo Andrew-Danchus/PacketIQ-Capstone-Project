@@ -167,7 +167,7 @@ async def analyze(request: Request):
         _current_evidence = evidence
         print("DEBUG: summarization completed")
 
-        return {"evidence": evidence, "pcap": pcap_path.name}
+        return {"evidence": evidence, "pcap": pcap_path.name, "detections": detection_results or {}}
 
     except HTTPException:
         raise
