@@ -29,7 +29,7 @@ DDOS_MIN_CONNECTIONS = 200
 DDOS_WINDOW_SECS = 60.0
 
 BRUTE_FORCE_MIN_ATTEMPTS = 5
-BRUTE_FORCE_PORTS = {22, 21, 23, 25, 110, 143, 3389, 5900}
+BRUTE_FORCE_PORTS = {22, 21, 23, 2323, 25, 110, 143, 3389, 5900}
 BRUTE_FORCE_WINDOW_SECS = 120.0
 
 FAILED_STATES = {
@@ -426,11 +426,12 @@ def _print_summary(results: dict) -> None:
 
     print(f"\n[3] Brute Force Detections: {len(results['brute_force'])}")
     for alert in results["brute_force"]:
+        window = alert.get("window_secs", "N/A")
         print(
             f"    {alert['src_ip']} -> {alert['dst_ip']}:{alert['dst_port']} — "
             f"{alert['failed_attempts']} failed / "
-            f"{alert['total_attempts']} total in "
-            f"{alert['window_secs']}s"
+            f"{alert['total_attempts']} total"
+            + (f" in {window}s" if window != "N/A" else "")
         )
 
         if alert.get("subtype") == "ssh":
