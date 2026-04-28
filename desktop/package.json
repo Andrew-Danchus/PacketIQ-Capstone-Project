@@ -16,14 +16,20 @@
       "output": "dist"
     },
     "files": [
-      "./main.js",
-      "./package.json"
+      "main.js",
+      "package.json"
     ],
     "extraResources": [
       {
         "from": "../",
         "to": "project",
         "filter": [
+          "Dockerfile",
+          "docker-compose.yml",
+          "requirements.txt",
+          "api.py",
+          "main.py",
+          "detection.py",
           "backend/**",
           "frontend/src/**",
           "frontend/public/**",
@@ -34,11 +40,17 @@
           "pcaps/**",
           "logs/**",
           "output/**",
-          "docker-compose.yml",
           "!frontend/node_modules/**",
           "!backend/__pycache__/**",
+          "!**/__pycache__/**",
+          "!**/.pytest_cache/**",
+          "!**/.venv/**",
+          "!**/venv/**",
+          "!**/node_modules/**",
           "!desktop/**",
-          "!.git/**"
+          "!.git/**",
+          "!.gitignore",
+          "!dist/**"
         ]
       }
     ],

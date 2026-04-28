@@ -35,6 +35,8 @@ async function startPacketIQ() {
     await runCommand(`${docker} compose down --remove-orphans`, projectRoot);
     await runCommand(`${docker} rm -f packetiq_ollama packetiq_db packetiq-capstone-project-backend-1 packetiq-capstone-project-frontend-1 project-backend-1 project-frontend-1`, projectRoot).catch(() => {});    
     await runCommand(`${docker} compose up --build -d`, projectRoot);
+    await runCommand(`${docker} exec packetiq_ollama ollama pull nomic-embed-text`, projectRoot);
+    await runCommand(`${docker} exec packetiq_ollama ollama pull llama3.2`, projectRoot);
   } catch (err) {
     dialog.showErrorBox("PacketIQ Startup Error", String(err));
     app.quit();
