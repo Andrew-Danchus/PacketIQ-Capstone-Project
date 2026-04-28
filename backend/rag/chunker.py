@@ -2,6 +2,65 @@ from pathlib import Path
 from typing import List
 import json
 
+
+# ─── DB-row chunk functions (used by pipeline.py) ─────────────────────────────
+
+def connection_to_chunk(row) -> str:
+    return (
+        f"At {row['ts']}, {row['src_ip']} connected to "
+        f"{row['dst_ip']}:{row['dst_port']} using {row['proto']}. "
+        f"Service: {row.get('service')}. Duration: {row.get('duration')}s. "
+        f"Sent {row.get('orig_bytes')} bytes and received {row.get('resp_bytes')} bytes. "
+        f"State: {row.get('conn_state')}."
+    )
+
+
+def aggregate_conn_to_chunk(row) -> str:
+    return (
+        f"{row['src_ip']} made {row['count']} connections to "
+        f"{row['dst_ip']}:{row['dst_port']} via {row['proto']} "
+        f"(service: {row.get('service') or 'unknown'}, state: {row['conn_state']}) "
+        f"between timestamps {row['first_ts']} and {row['last_ts']}."
+    )
+
+
+def dns_to_chunk(row) -> str:
+    return (
+        f"At {row['ts']}, host {row['src_ip']} queried {row.get('query')} over DNS. "
+        f"Destination {row.get('dst_ip')}:{row.get('dst_port')}. "
+        f"Response code: {row.get('rcode')}. Answers: {row.get('answers')}."
+    )
+
+
+def http_to_chunk(row) -> str:
+    return (
+        f"At {row['ts']}, {row['src_ip']} made an HTTP {row.get('method')} request "
+        f"to host {row.get('host')} URI {row.get('uri')}. "
+        f"Status code: {row.get('status_code')}. User-Agent: {row.get('user_agent')}."
+    )
+
+
+def tls_to_chunk(row) -> str:
+    return (
+        f"At {row['ts']}, TLS traffic from {row['src_ip']} to {row['dst_ip']}. "
+        f"Server name: {row.get('server_name')}. TLS version: {row.get('version')}. "
+        f"Cipher: {row.get('cipher')}. Certificate: {row.get('cert')}."
+    )
+
+
+def detection_to_chunk(row) -> str:
+    evidence = row.get("evidence")
+    if isinstance(evidence, dict):
+        evidence_text = json.dumps(evidence)
+    else:
+        evidence_text = str(evidence)
+
+    return (
+        f"Detection at {row['ts']}: {row['detection_type']} severity {row['severity']}. "
+        f"Source IP: {row.get('src_ip')}. Destination IP: {row.get('dst_ip')}. "
+        f"Destination port: {row.get('dst_port')}. Evidence: {evidence_text}."
+    )
+
 #cap chunks to keep RAG size manageable
 MAX_CONN_CHUNKS = 500
 MAX_DNS_CHUNKS = 200
@@ -149,11 +208,17 @@ def chunk_detection_alerts(results: dict) -> List[str]:
         chunks.append(chunk)
 
     for alert in results.get("brute_force", []):
+        window = alert.get("window_secs")
+        first_ts = alert.get("first_seen_ts")
+        last_ts = alert.get("last_seen_ts")
+
+        time_str = f" within {window} seconds" if window is not None else ""
+        ts_str = f" (timestamps {first_ts} to {last_ts})" if first_ts is not None else ""
+
         chunk = (
             f"Detection alert [BRUTE FORCE]: Source IP {alert['src_ip']} made "
             f"{alert['failed_attempts']} failed connection attempts out of {alert['total_attempts']} total "
-            f"to {alert['dst_ip']}:{alert['dst_port']} within {alert['window_secs']} seconds "
-            f"(timestamps {alert['first_seen_ts']} to {alert['last_seen_ts']})."
+            f"to {alert['dst_ip']}:{alert['dst_port']}{time_str}{ts_str}."
         )
         chunks.append(chunk)
 
@@ -165,15 +230,15 @@ def build_chunks_from_logs(log_dir: Path) -> List[str]:
     chunks = []
 
     conn_records = load_json_log(log_dir / "conn.log")
-    chunks.extend(chunk_conn_records(conn_records))
+    chunks.extend(chunk_conn_records(conn_records[:MAX_CONN_CHUNKS]))
 
     dns_records = load_json_log(log_dir / "dns.log")
-    chunks.extend(chunk_dns_records(dns_records))
+    chunks.extend(chunk_dns_records(dns_records[:MAX_DNS_CHUNKS]))
 
     weird_records = load_json_log(log_dir / "weird.log")
-    chunks.extend(chunk_weird_records(weird_records))
+    chunks.extend(chunk_weird_records(weird_records[:MAX_WEIRD_CHUNKS]))
 
     notice_records = load_json_log(log_dir / "notice.log")
-    chunks.extend(chunk_notice_records(notice_records))
+    chunks.extend(chunk_notice_records(notice_records[:MAX_NOTICE_CHUNKS]))
 
     return chunks
