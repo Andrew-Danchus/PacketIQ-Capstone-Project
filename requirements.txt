@@ -10,3 +10,5 @@ fastapi
 uvicorn[standard]
 python-multipart
 psycopg2-binary
+fastapi
+uvicorn[standard]

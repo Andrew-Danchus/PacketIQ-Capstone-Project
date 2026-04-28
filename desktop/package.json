@@ -1,0 +1,60 @@
+{
+  "name": "packetiq-desktop",
+  "version": "1.0.0",
+  "description": "PacketIQ desktop launcher",
+  "author": "Joey Axelrod",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.packetiq.app",
+    "productName": "PacketIQ",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "./main.js",
+      "./package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../",
+        "to": "project",
+        "filter": [
+          "backend/**",
+          "frontend/src/**",
+          "frontend/public/**",
+          "frontend/index.html",
+          "frontend/package.json",
+          "frontend/package-lock.json",
+          "frontend/vite.config.js",
+          "pcaps/**",
+          "logs/**",
+          "output/**",
+          "docker-compose.yml",
+          "!frontend/node_modules/**",
+          "!backend/__pycache__/**",
+          "!desktop/**",
+          "!.git/**"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PacketIQ"
+    }
+  },
+  "devDependencies": {
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1"
+  }
+}
