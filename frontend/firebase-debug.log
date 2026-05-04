@@ -1,0 +1,67 @@
+[debug] [2026-04-24T21:03:47.658Z] ----------------------------------------------------------------------
+[debug] [2026-04-24T21:03:47.660Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\jhaxe\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js init hosting
+[debug] [2026-04-24T21:03:47.660Z] CLI Version:   15.15.0
+[debug] [2026-04-24T21:03:47.660Z] Platform:      win32
+[debug] [2026-04-24T21:03:47.660Z] Node Version:  v24.11.1
+[debug] [2026-04-24T21:03:47.660Z] Time:          Fri Apr 24 2026 16:03:47 GMT-0500 (Central Daylight Time)
+[debug] [2026-04-24T21:03:47.661Z] ----------------------------------------------------------------------
+[debug] 
+[info] 
+     ######## #### ########  ######## ########     ###     ######  ########
+     ##        ##  ##     ## ##       ##     ##  ##   ##  ##       ##
+     ######    ##  ########  ######   ########  #########  ######  ######
+     ##        ##  ##    ##  ##       ##     ## ##     ##       ## ##
+     ##       #### ##     ## ######## ########  ##     ##  ######  ########
+
+You're about to initialize a Firebase project in this directory:
+
+  C:\Users\jhaxe\OneDrive - University of Missouri\Documents\GitHub\PacketIQ-Capstone-Project\frontend
+
+[info] 
+=== Project Setup
+[info] 
+[info] First, let's associate this project directory with a Firebase project.
+[info] You can create multiple project aliases by running firebase use --add, 
+[info] 
+[info] i  If you want to create a project in a Google Cloud organization or folder, please use "firebase projects:create" instead, and return to this command when you've created the project. 
+[debug] [2026-04-24T21:03:56.622Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-24T21:03:56.622Z] > authorizing via signed-in user (jab32@umsystem.edu)
+[debug] [2026-04-24T21:04:20.703Z] Checked if tokens are valid: true, expires at: 1777068127780
+[debug] [2026-04-24T21:04:20.703Z] Checked if tokens are valid: true, expires at: 1777068127780
+[debug] [2026-04-24T21:04:20.705Z] >>> [apiv2][query] POST https://firebase.googleapis.com/v1/projects:checkProjectId [none]
+[debug] [2026-04-24T21:04:20.705Z] >>> [apiv2][body] POST https://firebase.googleapis.com/v1/projects:checkProjectId {"proposedId":"345678"}
+[debug] [2026-04-24T21:04:21.076Z] <<< [apiv2][status] POST https://firebase.googleapis.com/v1/projects:checkProjectId 200
+[debug] [2026-04-24T21:04:21.076Z] <<< [apiv2][body] POST https://firebase.googleapis.com/v1/projects:checkProjectId {"projectIdStatus":"PROJECT_ID_NOT_VALID","suggestedProjectId":"project-8021855362172754145"}
+[debug] [2026-04-24T21:04:30.716Z] Checked if tokens are valid: true, expires at: 1777068127780
+[debug] [2026-04-24T21:04:30.716Z] Checked if tokens are valid: true, expires at: 1777068127780
+[debug] [2026-04-24T21:04:30.717Z] >>> [apiv2][query] POST https://firebase.googleapis.com/v1/projects:checkProjectId [none]
+[debug] [2026-04-24T21:04:30.717Z] >>> [apiv2][body] POST https://firebase.googleapis.com/v1/projects:checkProjectId {"proposedId":"45673234785"}
+[debug] [2026-04-24T21:04:31.077Z] <<< [apiv2][status] POST https://firebase.googleapis.com/v1/projects:checkProjectId 200
+[debug] [2026-04-24T21:04:31.077Z] <<< [apiv2][body] POST https://firebase.googleapis.com/v1/projects:checkProjectId {"projectIdStatus":"PROJECT_ID_NOT_VALID","suggestedProjectId":"project-2030821321153545641"}
+[debug] [2026-04-24T21:04:41.329Z] Checked if tokens are valid: true, expires at: 1777068127780
+[debug] [2026-04-24T21:04:41.330Z] Checked if tokens are valid: true, expires at: 1777068127780
+[debug] [2026-04-24T21:04:41.331Z] >>> [apiv2][query] POST https://firebase.googleapis.com/v1/projects:checkProjectId [none]
+[debug] [2026-04-24T21:04:41.331Z] >>> [apiv2][body] POST https://firebase.googleapis.com/v1/projects:checkProjectId {"proposedId":"project-2030821321153545641"}
+[debug] [2026-04-24T21:04:41.809Z] <<< [apiv2][status] POST https://firebase.googleapis.com/v1/projects:checkProjectId 200
+[debug] [2026-04-24T21:04:41.810Z] <<< [apiv2][body] POST https://firebase.googleapis.com/v1/projects:checkProjectId {"projectIdStatus":"PROJECT_ID_AVAILABLE","suggestedProjectId":"project-2030821321153545641"}
+[debug] [2026-04-24T21:04:52.596Z] Checked if tokens are valid: true, expires at: 1777068127780
+[debug] [2026-04-24T21:04:52.597Z] Checked if tokens are valid: true, expires at: 1777068127780
+[debug] [2026-04-24T21:04:52.597Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects [none]
+[debug] [2026-04-24T21:04:52.597Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects {"projectId":"project-2030821321153545641","name":"packetIQ"}
+[debug] [2026-04-24T21:04:52.950Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects 200
+[debug] [2026-04-24T21:04:52.950Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects {"name":"operations/create_project.global.6752716077670515232"}
+[debug] [2026-04-24T21:04:52.951Z] Checked if tokens are valid: true, expires at: 1777068127780
+[debug] [2026-04-24T21:04:52.951Z] Checked if tokens are valid: true, expires at: 1777068127780
+[debug] [2026-04-24T21:04:52.951Z] >>> [apiv2][query] GET https://cloudresourcemanager.googleapis.com/v1/operations/create_project.global.6752716077670515232 [none]
+[debug] [2026-04-24T21:04:53.153Z] <<< [apiv2][status] GET https://cloudresourcemanager.googleapis.com/v1/operations/create_project.global.6752716077670515232 200
+[debug] [2026-04-24T21:04:53.153Z] <<< [apiv2][body] GET https://cloudresourcemanager.googleapis.com/v1/operations/create_project.global.6752716077670515232 {"name":"operations/create_project.global.6752716077670515232","metadata":{"@type":"type.googleapis.com/google.cloudresourcemanager.v1.ProjectCreationStatus","ready":true},"done":true,"error":{"code":9,"message":"Callers must accept Terms of Service","details":[{"@type":"type.googleapis.com/google.rpc.PreconditionFailure","violations":[{"type":"TOS","subject":"cloud","description":"Callers must accept Terms of Service"}]}]}}
+[debug] [2026-04-24T21:04:53.157Z] FirebaseError: Callers must accept Terms of Service
+    at OperationPoller.poll (C:\Users\jhaxe\AppData\Roaming\npm\node_modules\firebase-tools\lib\operation-poller.js:25:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async createCloudProject (C:\Users\jhaxe\AppData\Roaming\npm\node_modules\firebase-tools\lib\management\projects.js:237:29)
+    at async createFirebaseProjectAndLog (C:\Users\jhaxe\AppData\Roaming\npm\node_modules\firebase-tools\lib\management\projects.js:102:9)
+    at async Object.doSetup (C:\Users\jhaxe\AppData\Roaming\npm\node_modules\firebase-tools\lib\init\features\project.js:64:24)
+    at async init (C:\Users\jhaxe\AppData\Roaming\npm\node_modules\firebase-tools\lib\init\index.js:98:13)
+    at async Command.initAction [as actionFn] (C:\Users\jhaxe\AppData\Roaming\npm\node_modules\firebase-tools\lib\commands\init.js:232:5)
+[error] 
+[error] Error: Failed to create project. See firebase-debug.log for more info.

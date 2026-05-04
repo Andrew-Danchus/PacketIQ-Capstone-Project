@@ -1,14 +1,46 @@
 {
-  "generated_at": "2026-04-27T23:06:12.336354+00:00",
+  "generated_at": "2026-05-04T02:48:05.971771+00:00",
   "summary": {
     "port_scans": 0,
     "ddos": 0,
-    "brute_force": 0,
-    "total": 0
+    "brute_force": 2,
+    "total": 2
   },
   "detections": {
     "port_scans": [],
     "ddos": [],
-    "brute_force": []
+    "brute_force": [
+      {
+        "type": "brute_force",
+        "severity": "high",
+        "src_ip": "192.168.1.70",
+        "dst_ip": "192.168.1.90",
+        "dst_port": 22,
+        "failed_attempts": 0,
+        "total_attempts": 1970,
+        "reason": "High number of repeated connections (likely brute force)",
+        "evidence": "192.168.1.70 made 1970 connections to 192.168.1.90:22. 0 showed failed states.",
+        "recommendation": "Block source IP or enable rate limiting."
+      },
+      {
+        "type": "brute_force",
+        "subtype": "ssh",
+        "severity": "high",
+        "src_ip": "192.168.1.70",
+        "dst_ip": "192.168.1.90",
+        "dst_port": 22,
+        "failed_connections": 2,
+        "failed_attempts": 2,
+        "total_attempts": 2,
+        "total_auth_attempts": 8,
+        "window_secs": 120.0,
+        "first_seen_ts": 18279.366765,
+        "last_seen_ts": 18279.366789,
+        "ssh_client": "SSH-2.0-paramiko_2.6.0",
+        "reason": "SSH authentication failures from ssh.log",
+        "evidence": "192.168.1.70 made 2 failed SSH connections with 8 total auth attempts against 192.168.1.90:22.",
+        "recommendation": "Review SSH auth logs, block or rate-limit the source IP, disable password authentication, and require key-based authentication."
+      }
+    ]
   }
 }

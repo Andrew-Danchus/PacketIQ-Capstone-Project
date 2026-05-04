@@ -13,7 +13,6 @@ function loadStoredSessions() {
   try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]'); }
   catch { return []; }
 }
-
 const SEVERITY_COLOR = { high: '#f85149', medium: '#e3b341', low: '#3fb950' };
 const SEVERITY_BG    = { high: 'rgba(248,81,73,0.12)', medium: 'rgba(227,179,65,0.12)', low: 'rgba(63,185,80,0.12)' };
 
@@ -87,6 +86,7 @@ function App() {
   const [detections, setDetections] = useState(null);
   const [pcapName, setPcapName] = useState(null);
   const [loading, setLoading]   = useState(false);
+  const [processingSeconds, setProcessingSeconds] = useState(0);
   const [pcapList, setPcapList] = useState([]);
   const [view, setView]         = useState('chat');
   const [aiSummary, setAiSummary]     = useState('');
@@ -101,6 +101,18 @@ function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
+
+  useEffect(() => {
+    if (!loading) return;
+
+    setProcessingSeconds(0);
+
+    const timer = setInterval(() => {
+      setProcessingSeconds(prev => prev + 1);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [loading]);
 
   useEffect(() => {
     fetch('/api/pcaps').then(r => r.json()).then(setPcapList).catch(() => {});
@@ -363,6 +375,11 @@ function App() {
                 <div>
                   <h2>Traffic Overview</h2>
                   {pcapName && <div className="ov-pcap-name">{pcapName}</div>}
+                  { (
+                    <div className="ov-processing-timer">
+                      Processing time: {processingSeconds}s
+                    </div>
+                  )}
                 </div>
               </div>
 

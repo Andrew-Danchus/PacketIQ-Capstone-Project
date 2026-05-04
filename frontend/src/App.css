@@ -765,7 +765,12 @@
   gap: 4px;
   color: var(--text);
 }
-
+.ov-processing-timer {
+  margin-top: 6px;
+  font-size: 0.9rem;
+  color: #58a6ff;
+  font-weight: 500;
+}
 .det-rec-label {
   font-size: 0.64rem;
   text-transform: uppercase;
