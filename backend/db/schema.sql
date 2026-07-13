@@ -2,9 +2,13 @@ CREATE TABLE jobs (
     id UUID PRIMARY KEY,
     filename TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    status TEXT NOT NULL DEFAULT 'uploaded',
+    status TEXT NOT NULL DEFAULT 'queued',   -- queued | processing | completed | failed
+    stage TEXT,                              -- zeek | detection | ingest | rag_index | summary
     file_size_bytes BIGINT,
-    error_message TEXT
+    error_message TEXT,
+    stats JSONB,                             -- structured traffic stats for the UI
+    evidence TEXT,                           -- prose summary used as LLM context
+    timings JSONB                            -- per-stage durations in seconds
 );
 
 CREATE TABLE connections(
@@ -114,8 +118,6 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 ALTER TABLE rag_chunks
 ADD COLUMN embedding vector(768);
-
-CREATE INDEX idx_rag_chunks_job_created_at ON rag_chunks(job_id, created_at);
 
 CREATE INDEX idx_rag_chunks_embedding_hnsw
 ON rag_chunks

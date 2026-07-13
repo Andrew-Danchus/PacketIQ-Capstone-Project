@@ -3,9 +3,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    command: ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
-    stdin_open: true
-    tty: true
+    command: ["uvicorn", "backend.api:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
       - ./:/app
       - ./pcaps:/app/pcaps
@@ -20,10 +18,11 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/packetiq
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: llama3.2
-      OLLAMA_TIMEOUT: "120"
-      OLLAMA_NUM_CTX: "2048"
+      OLLAMA_TIMEOUT: "180"
+      OLLAMA_NUM_CTX: "8192"
       PCAP_DIR: /app/pcaps
       LOG_DIR: /app/logs
+      OUTPUT_DIR: /app/output
 
   db:
     image: pgvector/pgvector:pg16

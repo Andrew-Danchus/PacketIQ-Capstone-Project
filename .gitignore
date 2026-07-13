@@ -1,17 +1,18 @@
+# Dependencies / build artifacts
 **/node_modules/
-**/.next/
 **/dist/
 **/build/
-logs/
-pcaps/
-.git/
-backend\ollama\__pycache__
-.venv/
-venv/
+
+# Python
 __pycache__/
 *.pyc
-logs/
-output/
-pcaps/
+.venv/
+venv/
 
-output/detection.json
+# Runtime data (never commit captures or generated logs)
+logs/
+pcaps/
+output/
+
+# Local environment
+.env

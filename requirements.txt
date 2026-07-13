@@ -1,12 +1,6 @@
-psycopg[binary]
-requests
-pydantic
-langchain
-langchain-core
-langchain-ollama
-langchain-community
-faiss-cpu
 fastapi
 uvicorn[standard]
 python-multipart
-psycopg2-binary
+pydantic
+requests
+psycopg[binary]

@@ -807,3 +807,219 @@
   max-width: 360px;
   line-height: 1.6;
 }
+
+/* ── Markdown rendering inside chat bubbles and AI boxes ── */
+
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+
+.markdown p {
+  margin: 0.5em 0;
+  line-height: 1.55;
+}
+
+.markdown ul, .markdown ol {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+
+.markdown li { margin: 0.25em 0; }
+
+.markdown h1, .markdown h2, .markdown h3, .markdown h4 {
+  margin: 0.8em 0 0.4em;
+  font-size: 0.95rem;
+  color: var(--accent);
+}
+
+.markdown code {
+  background: rgba(110, 118, 129, 0.25);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.markdown pre {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+
+.markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.markdown blockquote {
+  border-left: 3px solid var(--border);
+  margin: 0.5em 0;
+  padding-left: 10px;
+  color: var(--text-muted);
+}
+
+.markdown table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.85em;
+}
+
+.markdown th, .markdown td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+}
+
+.markdown strong { color: var(--text); }
+
+/* ── Data explorer: filter bar, paged tables, sub-tabs ── */
+
+.filter-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  align-items: center;
+}
+
+.filter-bar input,
+.filter-bar select {
+  background: var(--input-bg, rgba(255,255,255,0.04));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  color: var(--text);
+  font-size: 0.82rem;
+  outline: none;
+}
+
+.filter-bar input:focus,
+.filter-bar select:focus { border-color: var(--accent); }
+
+.filter-bar input { width: 150px; }
+.filter-bar .filter-narrow { width: 100px; }
+.filter-bar .filter-grow { flex: 1; min-width: 220px; }
+
+.filter-apply,
+.filter-reset {
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.filter-apply {
+  background: rgba(88, 166, 255, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.filter-apply:hover { background: rgba(88, 166, 255, 0.25); }
+
+.filter-reset { background: transparent; color: var(--text-muted); }
+.filter-reset:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+
+.table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.table-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.02);
+  border-bottom: 1px solid var(--border);
+}
+
+.table-count {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.table-pager { display: flex; gap: 6px; }
+
+.table-pager button {
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: 0.78rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.table-pager button:disabled { opacity: 0.4; cursor: default; }
+.table-pager button:not(:disabled):hover { background: rgba(255,255,255,0.06); }
+
+.table-scroll { overflow-x: auto; max-height: calc(100vh - 260px); overflow-y: auto; }
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+}
+
+.data-table th {
+  position: sticky;
+  top: 0;
+  background: var(--sidebar-bg, #10151c);
+  text-align: left;
+  padding: 8px 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.data-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: var(--text);
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.data-table tbody tr:hover { background: rgba(88, 166, 255, 0.06); }
+
+.data-table .col-time { color: var(--text-muted); }
+.data-table .col-ip { color: #79c0ff; }
+.data-table .col-narrow { text-align: right; }
+
+.table-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.sub-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sub-tab {
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.sub-tab:hover { color: var(--text); }
+.sub-tab.active { color: var(--accent); border-bottom-color: var(--accent); }

@@ -1,52 +1,45 @@
-import os
-import json
-import psycopg2
-from psycopg2.extras import RealDictCursor, execute_values
-import requests
+"""RAG index build and retrieval over pgvector."""
 
+import logging
+
+import psycopg
+import requests
+from psycopg.rows import dict_row
+
+from backend.config import DATABASE_URL, OLLAMA_BASE_URL, OLLAMA_EMBED_MODEL
 from backend.rag.chunker import (
-    connection_to_chunk,
     aggregate_conn_to_chunk,
+    connection_to_chunk,
+    detection_to_chunk,
     dns_to_chunk,
     http_to_chunk,
     tls_to_chunk,
-    detection_to_chunk,
 )
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
-EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+logger = logging.getLogger(__name__)
+
+EMBED_BATCH_SIZE = 64
 
 
 def get_conn():
-    return psycopg2.connect(DATABASE_URL)
+    return psycopg.connect(DATABASE_URL)
 
 
-def embed_texts(texts: list[str], batch_size: int = 200) -> list[list[float]]:
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    """Embed texts in batches via Ollama's /api/embed (array input)."""
     if not texts:
         return []
 
-    all_embeddings = []
-
-    for text in texts:
+    all_embeddings: list[list[float]] = []
+    for i in range(0, len(texts), EMBED_BATCH_SIZE):
+        batch = texts[i:i + EMBED_BATCH_SIZE]
         resp = requests.post(
-            f"{OLLAMA_BASE_URL}/api/embeddings",
-            json={
-                "model": EMBED_MODEL,
-                "prompt": text,
-            },
+            f"{OLLAMA_BASE_URL}/api/embed",
+            json={"model": OLLAMA_EMBED_MODEL, "input": batch},
             timeout=300,
         )
-
-        if resp.status_code != 200:
-            print("DEBUG: embedding failed")
-            print("DEBUG: status =", resp.status_code)
-            print("DEBUG: response =", resp.text)
-
         resp.raise_for_status()
-        data = resp.json()
-
-        all_embeddings.append(data["embedding"])
+        all_embeddings.extend(resp.json()["embeddings"])
 
     return all_embeddings
 
@@ -55,42 +48,51 @@ def embed_text(text: str) -> list[float]:
     return embed_texts([text])[0]
 
 
-def build_rag_index(job_id, *_args, **_kwargs):
+def vector_literal(vec: list[float]) -> str:
+    return "[" + ",".join(str(x) for x in vec) + "]"
+
+
+def build_rag_index(job_id) -> dict:
+    """Embed detection alerts and representative log records for a job.
+
+    Assumes the job's logs AND detection results are already ingested into
+    Postgres (see backend.db.ingest_logs).
+    """
     with get_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-
-            cur.execute("SELECT COUNT(*) FROM rag_chunks WHERE job_id = %s", (job_id,))
-            existing_count = cur.fetchone()["count"]
-
-            if existing_count > 0:
-                print(f"DEBUG: RAG index already exists for job_id={job_id}, skipping rebuild")
-                return {"status": "ok", "inserted": 0, "skipped": True}
-
-            chunks = []
+        with conn.cursor(row_factory=dict_row) as cur:
+            chunks: list[tuple[str, str]] = []
 
             # 1. Detection alerts — always fully embedded, no limit
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT ts, detection_type, severity, src_ip, dst_ip, dst_port, evidence
                 FROM detections
                 WHERE job_id = %s
                 ORDER BY ts
-            """, (job_id,))
+                """,
+                (job_id,),
+            )
             chunks.extend(("detections", detection_to_chunk(r)) for r in cur.fetchall())
 
             # 2. Granular connections involving detected attacker IPs
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT ts, src_ip, dst_ip, dst_port, proto, service, duration,
                        orig_bytes, resp_bytes, conn_state
                 FROM connections
                 WHERE job_id = %s
-                AND src_ip IN (SELECT DISTINCT src_ip FROM detections WHERE job_id = %s)
+                AND src_ip IN (SELECT DISTINCT src_ip FROM detections
+                               WHERE job_id = %s AND src_ip IS NOT NULL)
                 ORDER BY ts
                 LIMIT 300
-            """, (job_id, job_id))
+                """,
+                (job_id, job_id),
+            )
             chunks.extend(("connections", connection_to_chunk(r)) for r in cur.fetchall())
 
             # 3. Aggregated behavioral summary of all connections
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT src_ip, dst_ip, dst_port, proto, service, conn_state,
                        COUNT(*) AS count,
                        MIN(ts) AS first_ts, MAX(ts) AS last_ts
@@ -99,46 +101,56 @@ def build_rag_index(job_id, *_args, **_kwargs):
                 GROUP BY src_ip, dst_ip, dst_port, proto, service, conn_state
                 ORDER BY count DESC
                 LIMIT 200
-            """, (job_id,))
+                """,
+                (job_id,),
+            )
             chunks.extend(("connections_agg", aggregate_conn_to_chunk(r)) for r in cur.fetchall())
 
             # 4. DNS events
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT ts, src_ip, dst_ip, dst_port, query, rcode, answers
                 FROM dns_events
                 WHERE job_id = %s
                 ORDER BY ts
                 LIMIT 500
-            """, (job_id,))
+                """,
+                (job_id,),
+            )
             chunks.extend(("dns_events", dns_to_chunk(r)) for r in cur.fetchall())
 
             # 5. HTTP events
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT ts, src_ip, dst_ip, method, host, uri, user_agent, status_code
                 FROM http_events
                 WHERE job_id = %s
                 ORDER BY ts
                 LIMIT 250
-            """, (job_id,))
+                """,
+                (job_id,),
+            )
             chunks.extend(("http_events", http_to_chunk(r)) for r in cur.fetchall())
 
             # 6. TLS events
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT ts, src_ip, dst_ip, server_name, cert, version, cipher
                 FROM tls_events
                 WHERE job_id = %s
                 ORDER BY ts
                 LIMIT 250
-            """, (job_id,))
+                """,
+                (job_id,),
+            )
             chunks.extend(("tls_events", tls_to_chunk(r)) for r in cur.fetchall())
 
             if not chunks:
+                logger.warning("No chunks to embed for job %s", job_id)
                 return {"status": "ok", "inserted": 0}
 
             texts = [c[1] for c in chunks]
-
-            print(f"DEBUG: embedding {len(texts)} chunks")
-
+            logger.info("Embedding %d chunks for job %s", len(texts), job_id)
             embeddings = embed_texts(texts)
 
             rows = [
@@ -147,39 +159,39 @@ def build_rag_index(job_id, *_args, **_kwargs):
             ]
 
             cur.execute("DELETE FROM rag_chunks WHERE job_id = %s", (job_id,))
-
-            execute_values(
-                cur,
+            cur.executemany(
                 """
                 INSERT INTO rag_chunks (job_id, source, chunk_text, embedding)
-                VALUES %s
+                VALUES (%s, %s, %s, %s)
                 """,
                 rows,
-                template="(%s, %s, %s, %s)"
             )
 
         conn.commit()
 
-    print(f"DEBUG: inserted {len(rows)} RAG chunks")
-
+    logger.info("Inserted %d RAG chunks for job %s", len(rows), job_id)
     return {"status": "ok", "inserted": len(rows)}
-def vector_literal(vec):
-    return "[" + ",".join(str(x) for x in vec) + "]"
 
 
-def query_rag_context(job_id, question, top_k=8):
-    question_embedding =vector_literal(embed_text(question))
+def query_rag_context(job_id, question: str, top_k: int = 8) -> str:
+    """Return the most relevant chunks for a question, formatted as plain text."""
+    question_embedding = vector_literal(embed_text(question))
+
     with get_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
-                SELECT source, chunk_text,
-                       embedding <=> %s::vector AS distance
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT source, chunk_text
                 FROM rag_chunks
                 WHERE job_id = %s
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s
-            """, (question_embedding, job_id, question_embedding, top_k))
-
+                """,
+                (job_id, question_embedding, top_k),
+            )
             rows = cur.fetchall()
 
-    return rows
+    if not rows:
+        return "No log records retrieved for this question."
+
+    return "\n".join(f"[{row['source']}] {row['chunk_text']}" for row in rows)

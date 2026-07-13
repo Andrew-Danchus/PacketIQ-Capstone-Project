@@ -6,13 +6,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY . /app
 
-# Install requirements into a venv (PEP 668 compliant)
+COPY requirements.txt /app/requirements.txt
 RUN python3 -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
- && if [ -f "requirements.txt" ]; then /opt/venv/bin/pip install --no-cache-dir -r requirements.txt; fi
+ && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+COPY . /app
 
 ENV PATH="/opt/venv/bin:$PATH"
 
-CMD ["uvicorn", "api:app", "--host", "]
+CMD ["uvicorn", "backend.api:app", "--host", "0.0.0.0", "--port", "8000"]

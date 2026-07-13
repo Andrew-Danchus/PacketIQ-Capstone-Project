@@ -1,9 +1,15 @@
+"""Ingest Zeek JSON logs and detection results into PostgreSQL."""
+
 import json
-import time
-from pathlib import Path
+import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 import psycopg
+
+from backend.parsing.zeek_logs import load_json_log
+
+logger = logging.getLogger(__name__)
 
 
 def parse_ts(value):
@@ -11,7 +17,7 @@ def parse_ts(value):
         return None
     try:
         return datetime.fromtimestamp(float(value), tz=timezone.utc)
-    except Exception:
+    except (TypeError, ValueError, OSError):
         return None
 
 
@@ -20,7 +26,7 @@ def parse_int(value):
         return None
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -29,50 +35,28 @@ def parse_float(value):
         return None
     try:
         return float(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
-def load_json_log(path: Path):
-    records = []
-
-    if not path.exists():
-        return records
-
-    with path.open("r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-
-    return records
-
-
 def insert_connections(conn, job_id, records):
-    rows = []
-    for r in records:
-        rows.append(
-            (
-                job_id,
-                parse_ts(r.get("ts")),
-                r.get("id.orig_h"),
-                parse_int(r.get("id.orig_p")),
-                r.get("id.resp_h"),
-                parse_int(r.get("id.resp_p")),
-                r.get("proto"),
-                r.get("service"),
-                parse_float(r.get("duration")),
-                parse_int(r.get("orig_bytes")),
-                parse_int(r.get("resp_bytes")),
-                r.get("conn_state"),
-            )
+    rows = [
+        (
+            job_id,
+            parse_ts(r.get("ts")),
+            r.get("id.orig_h"),
+            parse_int(r.get("id.orig_p")),
+            r.get("id.resp_h"),
+            parse_int(r.get("id.resp_p")),
+            r.get("proto"),
+            r.get("service"),
+            parse_float(r.get("duration")),
+            parse_int(r.get("orig_bytes")),
+            parse_int(r.get("resp_bytes")),
+            r.get("conn_state"),
         )
-
+        for r in records
+    ]
     if not rows:
         return
 
@@ -89,24 +73,22 @@ def insert_connections(conn, job_id, records):
 
 
 def insert_dns(conn, job_id, records):
-    rows = []
-    for r in records:
-        rows.append(
-            (
-                job_id,
-                parse_ts(r.get("ts")),
-                r.get("id.orig_h"),
-                parse_int(r.get("id.orig_p")),
-                r.get("id.resp_h"),
-                parse_int(r.get("id.resp_p")),
-                r.get("proto"),
-                r.get("query"),
-                parse_int(r.get("qtype")),
-                parse_int(r.get("rcode")),
-                str(r.get("answers")),
-            )
+    rows = [
+        (
+            job_id,
+            parse_ts(r.get("ts")),
+            r.get("id.orig_h"),
+            parse_int(r.get("id.orig_p")),
+            r.get("id.resp_h"),
+            parse_int(r.get("id.resp_p")),
+            r.get("proto"),
+            r.get("query"),
+            parse_int(r.get("qtype")),
+            parse_int(r.get("rcode")),
+            json.dumps(r.get("answers")) if r.get("answers") is not None else None,
         )
-
+        for r in records
+    ]
     if not rows:
         return
 
@@ -123,25 +105,23 @@ def insert_dns(conn, job_id, records):
 
 
 def insert_http(conn, job_id, records):
-    rows = []
-    for r in records:
-        rows.append(
-            (
-                job_id,
-                parse_ts(r.get("ts")),
-                r.get("id.orig_h"),
-                parse_int(r.get("id.orig_p")),
-                r.get("id.resp_h"),
-                parse_int(r.get("id.resp_p")),
-                r.get("proto"),
-                r.get("method"),
-                r.get("host"),
-                r.get("uri"),
-                r.get("user_agent"),
-                parse_int(r.get("status_code")),
-            )
+    rows = [
+        (
+            job_id,
+            parse_ts(r.get("ts")),
+            r.get("id.orig_h"),
+            parse_int(r.get("id.orig_p")),
+            r.get("id.resp_h"),
+            parse_int(r.get("id.resp_p")),
+            r.get("proto"),
+            r.get("method"),
+            r.get("host"),
+            r.get("uri"),
+            r.get("user_agent"),
+            parse_int(r.get("status_code")),
         )
-
+        for r in records
+    ]
     if not rows:
         return
 
@@ -158,21 +138,19 @@ def insert_http(conn, job_id, records):
 
 
 def insert_tls(conn, job_id, records):
-    rows = []
-    for r in records:
-        rows.append(
-            (
-                job_id,
-                parse_ts(r.get("ts")),
-                r.get("id.orig_h"),
-                r.get("id.resp_h"),
-                r.get("server_name"),
-                r.get("subject"),
-                r.get("version"),
-                r.get("cipher"),
-            )
+    rows = [
+        (
+            job_id,
+            parse_ts(r.get("ts")),
+            r.get("id.orig_h"),
+            r.get("id.resp_h"),
+            r.get("server_name"),
+            r.get("subject"),
+            r.get("version"),
+            r.get("cipher"),
         )
-
+        for r in records
+    ]
     if not rows:
         return
 
@@ -187,21 +165,22 @@ def insert_tls(conn, job_id, records):
         )
 
 
-def insert_notice(conn, job_id, records):
-    rows = []
-    for r in records:
-        rows.append(
-            (
-                job_id,
-                r.get("note"),
-                "medium",
-                r.get("src"),
-                r.get("dst"),
-                parse_int(r.get("p")),
-                json.dumps(r),
-            )
+def insert_zeek_notices(conn, job_id, records):
+    """Zeek notice.log entries are stored as detections of type zeek_notice
+    so they surface alongside PacketIQ's own detections."""
+    rows = [
+        (
+            job_id,
+            parse_ts(r.get("ts")) or datetime.now(tz=timezone.utc),
+            f"zeek_notice:{r.get('note', 'unknown')}",
+            "medium",
+            r.get("src"),
+            r.get("dst"),
+            parse_int(r.get("p")),
+            json.dumps(r),
         )
-
+        for r in records
+    ]
     if not rows:
         return
 
@@ -209,57 +188,69 @@ def insert_notice(conn, job_id, records):
         cur.executemany(
             """
             INSERT INTO detections
-            (job_id, detection_type, severity, src_ip, dst_ip, dst_port, evidence)
-            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            (job_id, ts, detection_type, severity, src_ip, dst_ip, dst_port, evidence)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
             """,
             rows,
         )
 
 
-def ingest_job_logs(job_id, filename, file_size_bytes, log_dir, dsn):
+def insert_detections(conn, job_id, detection_results: dict):
+    """Persist run_detections() output so the RAG index and API can query it.
+
+    This was the core missing link in the original implementation: detection
+    alerts were shown in the UI but never stored, so the AI never saw them.
+    """
+    rows = []
+    for alert in (
+        detection_results.get("port_scans", [])
+        + detection_results.get("ddos", [])
+        + detection_results.get("brute_force", [])
+    ):
+        rows.append(
+            (
+                job_id,
+                parse_ts(alert.get("first_seen_ts")) or datetime.now(tz=timezone.utc),
+                alert.get("type", "unknown"),
+                alert.get("severity", "medium"),
+                alert.get("src_ip"),
+                alert.get("dst_ip"),
+                parse_int(alert.get("dst_port")),
+                json.dumps(alert),
+            )
+        )
+    if not rows:
+        return
+
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO detections
+            (job_id, ts, detection_type, severity, src_ip, dst_ip, dst_port, evidence)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            """,
+            rows,
+        )
+    logger.info("Inserted %d detection alerts for job %s", len(rows), job_id)
+
+
+def ingest_job_logs(job_id, log_dir, dsn, detection_results: dict | None = None):
+    """Ingest all Zeek logs and detection alerts for an existing job row.
+
+    Job lifecycle (create/stage/complete/fail) is owned by backend.db.jobs.
+    """
     log_dir = Path(log_dir)
 
     with psycopg.connect(dsn) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO jobs (id, filename, file_size_bytes, status)
-                VALUES (%s,%s,%s,'processing')
-                """,
-                (job_id, filename, file_size_bytes),
-            )
-
-        conn.commit()
-
-        start = time.perf_counter()
-        print("Inserting connections...")
         insert_connections(conn, job_id, load_json_log(log_dir / "conn.log"))
-        print(f"Connections inserted in {time.perf_counter() - start:.2f}s")
-
-        start = time.perf_counter()
-        print("Inserting DNS events...")
         insert_dns(conn, job_id, load_json_log(log_dir / "dns.log"))
-        print(f"DNS events inserted in {time.perf_counter() - start:.2f}s")
-
-        start = time.perf_counter()
-        print("Inserting HTTP events...")
         insert_http(conn, job_id, load_json_log(log_dir / "http.log"))
-        print(f"HTTP events inserted in {time.perf_counter() - start:.2f}s")
-
-        start = time.perf_counter()
-        print("Inserting TLS events...")
         insert_tls(conn, job_id, load_json_log(log_dir / "ssl.log"))
-        print(f"TLS events inserted in {time.perf_counter() - start:.2f}s")
+        insert_zeek_notices(conn, job_id, load_json_log(log_dir / "notice.log"))
 
-        start = time.perf_counter()
-        print("Inserting notice events...")
-        insert_notice(conn, job_id, load_json_log(log_dir / "notice.log"))
-        print(f"Notice events inserted in {time.perf_counter() - start:.2f}s")
-
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE jobs SET status='completed' WHERE id=%s",
-                (job_id,),
-            )
+        if detection_results:
+            insert_detections(conn, job_id, detection_results)
 
         conn.commit()
+
+    logger.info("Ingestion complete for job %s", job_id)

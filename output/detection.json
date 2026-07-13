@@ -1,45 +1,30 @@
 {
-  "generated_at": "2026-05-04T02:48:05.971771+00:00",
+  "generated_at": "2026-07-13T23:38:11.823786+00:00",
   "summary": {
     "port_scans": 0,
     "ddos": 0,
-    "brute_force": 2,
-    "total": 2
+    "brute_force": 1,
+    "total": 1
   },
   "detections": {
     "port_scans": [],
     "ddos": [],
     "brute_force": [
       {
-        "type": "brute_force",
         "severity": "high",
+        "failed_attempts": 3439,
+        "avg_bytes_per_attempt": 141,
+        "reason": "3439 completed connections to ftp averaging only 141 bytes each \u2014 consistent with repeated application-layer login failures",
+        "evidence": "192.168.1.70 made 3470 connections to 192.168.1.90:21 (ftp), 3439 of which completed but exchanged under 400 bytes \u2014 too small for legitimate sessions.",
+        "type": "brute_force",
+        "service": "ftp",
         "src_ip": "192.168.1.70",
         "dst_ip": "192.168.1.90",
-        "dst_port": 22,
-        "failed_attempts": 0,
-        "total_attempts": 1970,
-        "reason": "High number of repeated connections (likely brute force)",
-        "evidence": "192.168.1.70 made 1970 connections to 192.168.1.90:22. 0 showed failed states.",
-        "recommendation": "Block source IP or enable rate limiting."
-      },
-      {
-        "type": "brute_force",
-        "subtype": "ssh",
-        "severity": "high",
-        "src_ip": "192.168.1.70",
-        "dst_ip": "192.168.1.90",
-        "dst_port": 22,
-        "failed_connections": 2,
-        "failed_attempts": 2,
-        "total_attempts": 2,
-        "total_auth_attempts": 8,
-        "window_secs": 120.0,
-        "first_seen_ts": 18279.366765,
-        "last_seen_ts": 18279.366789,
-        "ssh_client": "SSH-2.0-paramiko_2.6.0",
-        "reason": "SSH authentication failures from ssh.log",
-        "evidence": "192.168.1.70 made 2 failed SSH connections with 8 total auth attempts against 192.168.1.90:22.",
-        "recommendation": "Review SSH auth logs, block or rate-limit the source IP, disable password authentication, and require key-based authentication."
+        "dst_port": 21,
+        "total_attempts": 3470,
+        "first_seen_ts": 14315.154879,
+        "last_seen_ts": 108472.856982,
+        "recommendation": "Review authentication logs on the target, block or rate-limit the source IP, and enforce key-based or MFA authentication."
       }
     ]
   }
