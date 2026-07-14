@@ -34,7 +34,21 @@ const SUMMARY_ICONS = {
   ),
 };
 
-export default function DetectionsView({ detections }) {
+function askAboutText(alert) {
+  const label = { port_scan: 'port scan', ddos: 'DDoS', brute_force: 'brute-force' }[alert.type] || alert.type;
+  const target = alert.dst_ip ? ` targeting ${alert.dst_ip}${alert.dst_port ? `:${alert.dst_port}` : ''}` : '';
+  const source = alert.src_ip ? ` from ${alert.src_ip}` : '';
+  return `Explain this ${label} detection${source}${target}. Is it a real threat, and what should I do about it?`;
+}
+
+// The connection filters that show the raw flows behind an alert.
+function alertFilters(alert) {
+  if (alert.type === 'port_scan') return { src_ip: alert.src_ip };
+  if (alert.type === 'ddos') return { dst_ip: alert.dst_ip };
+  return { src_ip: alert.src_ip, dst_ip: alert.dst_ip, dst_port: alert.dst_port };
+}
+
+export default function DetectionsView({ detections, onAskAbout, onViewConnections }) {
   const portScans  = detections?.port_scans  || [];
   const ddos       = detections?.ddos        || [];
   const bruteForce = detections?.brute_force || [];
@@ -149,6 +163,23 @@ export default function DetectionsView({ detections }) {
                     <span>{alert.recommendation}</span>
                   </div>
                 )}
+
+                <div className="det-actions">
+                  {onAskAbout && (
+                    <button className="ask-ai-chip" onClick={() => onAskAbout(askAboutText(alert))}>
+                      ✨ Ask AI about this
+                    </button>
+                  )}
+                  {onViewConnections && (
+                    <button
+                      className="ask-ai-chip neutral"
+                      onClick={() => onViewConnections(alertFilters(alert))}
+                      title="Open the Connections tab filtered to this alert's traffic"
+                    >
+                      ⇢ View connections
+                    </button>
+                  )}
+                </div>
 
               </div>
             );

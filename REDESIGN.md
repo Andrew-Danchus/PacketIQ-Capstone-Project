@@ -117,6 +117,25 @@ Implementation notes:
 - Keep the existing SSE streaming + markdown rendering; only the layout and context-passing change.
 - Responsive fallback: below a breakpoint, collapse the copilot back into a toggle/overlay so mobile still works.
 
+### Natural chat tone (de-blueprint the system prompt)
+
+The current system prompt is too prescriptive and the answers come out feeling templated — the rigid "Output style: lead with the answer, then evidence, then next steps" plus the OBSERVED/INFERRED/RECOMMENDED labeling makes every reply read like a filled-in form. Loosen it so the chat feels like talking to an analyst, not a report generator.
+
+- Replace the fixed output-structure rules with intent: answer conversationally, match the length and shape of the response to the question (a yes/no question gets a sentence, not a three-section brief).
+- Keep the *substance* that matters — evidence grounding, no hallucinated hosts/ports, defanged IOCs, correct Zeek `conn_state` reading — but drop the mandatory section headings and forced labeling. Let the model cite evidence inline and naturally.
+- Reserve the structured/heavy format for when it's actually warranted (the Overview "summary + 5 steps" ask can keep its own tailored prompt; that one *wants* structure).
+- Consider a lighter touch on temperature/sampling for the chat path so replies aren't robotic.
+- Iterate against real transcripts: the test is whether a human analyst would find the tone natural, so eyeball several Q&A exchanges after changing it.
+
+### AI search on the Connections explorer
+
+Add a natural-language search box to the Connections tab: type "failed SSH connections from 192.168.1.70" and it filters the table, instead of hand-setting the IP/port/state fields.
+
+- Implementation: a small LLM call translates the NL query into the **structured filter params the existing `/api/jobs/{id}/connections` endpoint already accepts** (src_ip, dst_ip, dst_port, conn_state) — NOT raw SQL. This keeps the parameterized-query safety and needs no new query path. Map fuzzy terms ("failed" → the failed-state set, "SSH" → port 22 / service ssh, "web" → 80/443).
+- New endpoint like `POST /api/jobs/{id}/connections/search { "query": "..." }` that returns the resolved filters (show the user what it parsed, let them tweak) and the first page of results.
+- Fall back gracefully: if the model can't parse it, show the filters it *did* extract and a note, rather than erroring.
+- Natural extension later: same NL→filter approach for the DNS/HTTP/TLS protocol tables, and eventually NL→safe aggregate for "how many…" questions (ties into the hybrid-retrieval SQL layer already built in `backend/rag/sql_context.py`).
+
 ### Live packet capture (the Wireshark-like feature)
 
 Reality check: the backend container **cannot** sniff host NICs under Docker Desktop on Windows (WSL2/Hyper-V isolation). Two viable designs:
@@ -149,7 +168,8 @@ Feature slice, in order:
 
 ### Enrichment & reporting
 
-- [ ] GeoIP + ASN for external IPs (MaxMind GeoLite2, offline, free) — show country/org on every alert and in the connections table.
+- [ ] **Capture-derived DNS resolution (agreed next after live capture):** the capture already carries its own DNS in `dns_events` (query→answers). Reverse that into an IP→hostname map so connections can be shown with the domain the host actually resolved to reach that IP. Offline, no external calls, forensically correct (shows the name as it was *at capture time*). Surface hostnames under IPs in the Connections table; reuse in detections/report/copilot context. Design: `GET /api/jobs/{id}/resolve` → `{ip: [domains]}`, built by parsing `dns_events.answers` (stored as a JSON string) for A/AAAA answers. Optional, opt-in second tier: live reverse-DNS (PTR) for public IPs the capture doesn't cover — off by default because it leaks investigated IPs to an external resolver and reflects DNS *now*, not at capture time.
+- [ ] GeoIP + ASN for external IPs (MaxMind GeoLite2, offline, free) — show country/org on every alert and in the connections table. ✅ done (graceful degradation without DBs)
 - [ ] Threat-intel tagging: offline feeds (abuse.ch SSLBL/Feodo) bundled at build time; optional VirusTotal lookup behind an API-key setting.
 - [ ] IOC export: one click → CSV/JSON of suspicious IPs/domains/JA3 hashes.
 - [ ] **Report generation:** "Export report" → markdown/PDF containing capture metadata, stats, detections with evidence, AI summary, and recommendations. This is the feature that makes it portfolio/demo gold.
@@ -162,7 +182,13 @@ Feature slice, in order:
 2. Phase 0 cleanup/dedup/dead code — the codebase becomes safe to build on.
 3. Phase 1 API restructure + streaming + system prompt — the core experience gets good.
 4. Connections explorer + HTTP/TLS/DNS tabs (cheap wins, data already there). ✅ done
-5. Copilot layout (persistent side-by-side chat) + context-aware questions.
-6. GeoIP/ASN enrichment + report export (high-visibility, low-risk).
-7. Live capture agent (biggest new feature, isolated from the rest).
-8. New detections (DNS tunneling, beaconing, exfil) — iterate indefinitely.
+5. Copilot layout (persistent side-by-side chat) + context-aware questions. ✅ done
+6. De-blueprint the system prompt so chat feels natural (quick, high-impact). ✅ done
+7. AI search on the Connections explorer (NL → structured filters). ✅ done
+8. GeoIP/ASN enrichment + report export (high-visibility, low-risk). ✅ done
+9. Live packet capture (in-app, Wireshark-style). ← NEXT (agreed)
+10. Capture-derived DNS resolution in Connections. ← after live capture (agreed)
+11. New detections (DNS tunneling, beaconing, exfil) — iterate indefinitely.
+12. Timeline & conversation views (Wireshark-style).
+
+UX polish shipped after the numbered items above: welcome drop zone + whole-window drag-and-drop, analysis progress stepper, cross-navigation (detections/overview → filtered connections), suggested-question chips, conn_state tooltips, sidebar redesign (copilot moved to middle; collapsible ChatGPT/Claude-style sidebar with Upload PCAP primary action + delete sessions).

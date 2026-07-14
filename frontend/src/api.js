@@ -38,6 +38,10 @@ export async function listJobs(limit = 10) {
   return handleResponse(await fetch(`/api/jobs?limit=${limit}`));
 }
 
+export async function deleteJob(jobId) {
+  return handleResponse(await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' }));
+}
+
 export async function getConnections(jobId, params = {}) {
   const qs = new URLSearchParams(
     Object.entries(params).filter(([, v]) => v !== '' && v != null)
@@ -50,6 +54,36 @@ export async function getProtocolEvents(jobId, protocol, params = {}) {
     Object.entries(params).filter(([, v]) => v !== '' && v != null)
   ).toString();
   return handleResponse(await fetch(`/api/jobs/${jobId}/${protocol}?${qs}`));
+}
+
+export async function searchConnections(jobId, query, params = {}) {
+  return handleResponse(await fetch(`/api/jobs/${jobId}/connections/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, ...params }),
+  }));
+}
+
+export async function getGeoip(jobId, limit = 100) {
+  return handleResponse(await fetch(`/api/jobs/${jobId}/geoip?limit=${limit}`));
+}
+
+// Trigger a browser download of the markdown report.
+export async function downloadReport(jobId, pcapName) {
+  const res = await fetch(`/api/jobs/${jobId}/report`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `Report failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `packetiq-report-${(pcapName || jobId).replace(/\.[^.]+$/, '')}.md`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -70,11 +104,11 @@ export async function waitForJob(jobId, onStage) {
 }
 
 // Stream an answer over SSE; calls onToken per fragment, resolves with full text.
-export async function askQuestionStream(jobId, question, onToken) {
+export async function askQuestionStream(jobId, question, onToken, viewContext = '') {
   const res = await fetch('/api/ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ job_id: jobId, question }),
+    body: JSON.stringify({ job_id: jobId, question, view_context: viewContext }),
   });
 
   if (!res.ok) {

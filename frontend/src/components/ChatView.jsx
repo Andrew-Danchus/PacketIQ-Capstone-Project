@@ -8,19 +8,14 @@ export default function ChatView({
   setInput,
   hasSession,
   onSend,
-  onFileSelected,
+  suggestions = [],
+  onSuggestion,
 }) {
   const chatEndRef = useRef(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
-
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) onFileSelected(file);
-    e.target.value = '';
-  };
 
   return (
     <>
@@ -44,20 +39,26 @@ export default function ChatView({
         <div ref={chatEndRef} />
       </div>
 
+      {suggestions.length > 0 && (
+        <div className="suggestion-chips">
+          {suggestions.map((q, i) => (
+            <button key={i} className="suggestion-chip" onClick={() => onSuggestion?.(q)}>
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="input-area">
-        <label className="upload-btn" title="Upload PCAP">
-          +
-          <input type="file" accept=".pcap,.pcapng,.cap" onChange={handleFileChange} style={{ display: 'none' }} />
-        </label>
         <input
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && onSend()}
-          placeholder={hasSession ? 'Ask a follow-up question…' : 'Type a PCAP filename or path…'}
-          disabled={loading}
+          placeholder={hasSession ? 'Ask a follow-up question…' : 'Add a PCAP from the sidebar to start'}
+          disabled={loading || !hasSession}
         />
-        <button onClick={onSend} disabled={loading || !input.trim()}>
-          {loading ? '…' : hasSession ? 'Ask' : 'Analyze'}
+        <button onClick={onSend} disabled={loading || !hasSession || !input.trim()}>
+          {loading ? '…' : 'Ask'}
         </button>
       </div>
     </>

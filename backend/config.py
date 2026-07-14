@@ -17,6 +17,11 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "180"))
 OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.6"))
+
+# Optional MaxMind GeoLite2 databases for IP enrichment (mounted at runtime).
+GEOIP_CITY_DB = os.getenv("GEOIP_CITY_DB", str(PROJECT_ROOT / "data" / "GeoLite2-City.mmdb"))
+GEOIP_ASN_DB = os.getenv("GEOIP_ASN_DB", str(PROJECT_ROOT / "data" / "GeoLite2-ASN.mmdb"))
 
 ALLOWED_PCAP_EXTENSIONS = {".pcap", ".pcapng", ".cap"}
 

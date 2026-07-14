@@ -158,12 +158,70 @@ def get_job_result(job_id: str) -> dict | None:
     }
 
 
+def delete_job(job_id: str) -> bool:
+    """Delete a job and all its rows (connections, events, detections, rag chunks
+    cascade via FK ON DELETE CASCADE). Returns True if a row was removed."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
+            deleted = cur.rowcount
+        conn.commit()
+    return deleted > 0
+
+
 def get_evidence(job_id: str) -> str | None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT evidence FROM jobs WHERE id = %s", (job_id,))
             row = cur.fetchone()
     return row[0] if row else None
+
+
+def existing_ips(job_id: str, candidates: list[str]) -> set[str]:
+    """Of the candidate IPs, return those that actually appear in the capture.
+    Used to drop IPs an LLM may have hallucinated when parsing an NL query."""
+    if not candidates:
+        return set()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT host(ip) FROM (
+                    SELECT src_ip AS ip FROM connections
+                    WHERE job_id = %s AND src_ip = ANY(%s::inet[])
+                    UNION
+                    SELECT dst_ip AS ip FROM connections
+                    WHERE job_id = %s AND dst_ip = ANY(%s::inet[])
+                ) t
+                """,
+                (job_id, candidates, job_id, candidates),
+            )
+            return {r[0] for r in cur.fetchall()}
+
+
+def get_peer_ips(job_id: str, limit: int = 200) -> list[dict]:
+    """Distinct IPs seen in the capture (src or dst) with connection counts,
+    busiest first — the input set for GeoIP enrichment."""
+    with get_conn() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT host(ip) AS ip, SUM(count) AS count FROM (
+                    SELECT src_ip AS ip, COUNT(*) AS count
+                    FROM connections WHERE job_id = %s AND src_ip IS NOT NULL
+                    GROUP BY src_ip
+                    UNION ALL
+                    SELECT dst_ip AS ip, COUNT(*) AS count
+                    FROM connections WHERE job_id = %s AND dst_ip IS NOT NULL
+                    GROUP BY dst_ip
+                ) t
+                GROUP BY host(ip)
+                ORDER BY count DESC
+                LIMIT %s
+                """,
+                (job_id, job_id, limit),
+            )
+            return [{"ip": r["ip"], "count": int(r["count"])} for r in cur.fetchall()]
 
 
 def query_connections(

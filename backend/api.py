@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 from backend.config import (
@@ -22,10 +22,13 @@ from backend.config import (
     setup_logging,
 )
 from backend.db import jobs
+from backend.enrich import geoip
 from backend.ollama.service import analyze_evidence_stream
 from backend.pipeline import PipelineError, create_analysis_job, run_job
+from backend.rag.nl_query import parse_connection_query
 from backend.rag.pipeline import query_rag_context
 from backend.rag.sql_context import build_sql_context
+from backend.report import generate_markdown_report
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -47,6 +50,13 @@ class AnalyzePathRequest(BaseModel):
 class AskRequest(BaseModel):
     job_id: str
     question: str
+    view_context: str = ""
+
+
+class ConnectionSearchRequest(BaseModel):
+    query: str
+    limit: int = 100
+    offset: int = 0
 
 
 def safe_pcap_path(name: str) -> Path:
@@ -118,6 +128,13 @@ def list_jobs(limit: int = 10):
     return jobs.list_jobs(limit=min(limit, 50))
 
 
+@app.delete("/api/jobs/{job_id}")
+def delete_job(job_id: str):
+    if not jobs.delete_job(job_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"deleted": job_id}
+
+
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str):
     job = jobs.get_job(job_id)
@@ -157,6 +174,56 @@ def get_job_connections(
         conn_state=conn_state,
         limit=limit,
         offset=offset,
+    )
+
+
+@app.post("/api/jobs/{job_id}/connections/search")
+def search_connections(job_id: str, req: ConnectionSearchRequest):
+    if jobs.get_job(job_id) is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    filters = parse_connection_query(req.query)
+
+    # Drop any IP the model invented that isn't actually in this capture, so a
+    # hallucinated address doesn't silently return zero results.
+    candidates = [filters[k] for k in ("src_ip", "dst_ip") if k in filters]
+    dropped = []
+    if candidates:
+        present = jobs.existing_ips(job_id, candidates)
+        for k in ("src_ip", "dst_ip"):
+            if k in filters and filters[k] not in present:
+                dropped.append(filters.pop(k))
+
+    page = jobs.query_connections(job_id, limit=req.limit, offset=req.offset, **filters)
+    # Echo back what we parsed so the UI can show/let the user tweak it.
+    return {"filters": filters, "dropped_ips": dropped, **page}
+
+
+@app.get("/api/jobs/{job_id}/geoip")
+def get_job_geoip(job_id: str, limit: int = 100):
+    if jobs.get_job(job_id) is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    peers = jobs.get_peer_ips(job_id, limit=limit)
+    enriched = []
+    for peer in peers:
+        info = geoip.enrich_ip(peer["ip"])
+        info["count"] = peer["count"]
+        enriched.append(info)
+
+    external = [e for e in enriched if e["scope"] == "public"]
+    return {"status": geoip.status(), "external_count": len(external), "peers": enriched}
+
+
+@app.get("/api/jobs/{job_id}/report", response_class=PlainTextResponse)
+def get_job_report(job_id: str):
+    report = generate_markdown_report(job_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Job not found or not completed")
+    return PlainTextResponse(
+        report,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="packetiq-report-{job_id[:8]}.md"'},
     )
 
 
@@ -200,7 +267,7 @@ def ask(req: AskRequest):
     def event_stream():
         try:
             for fragment in analyze_evidence_stream(
-                req.question, evidence, rag_context, sql_context
+                req.question, evidence, rag_context, sql_context, req.view_context
             ):
                 yield f"data: {json.dumps({'token': fragment})}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"

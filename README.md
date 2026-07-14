@@ -14,8 +14,11 @@ PacketIQ is a full-stack network analysis platform that ingests PCAP files, pars
 - **RAG pipeline** — retrieves relevant log records and detection alerts as LLM context via pgvector
 - **Traffic Overview** — stat cards, bar charts for top services/ports, connection-state breakdown, DNS queries, and weird events
 - **Threat Detection** — automatic identification of port scans, DDoS, and brute-force attacks with severity ratings and remediation recommendations
-- **Connections explorer** — searchable, filterable, paged table over every connection in the capture (filter by source/destination IP, port, or connection state)
+- **Copilot chat** — a persistent side-by-side AI panel that stays open while you browse the tabs; it knows which view and filters are active, so you can ask "is this normal?" about what's on screen. "Ask AI about this" chips on detections and filtered connections pre-fill the question
+- **Connections explorer** — searchable, filterable, paged table over every connection, plus an **AI search** box that turns plain English ("failed SSH from 192.168.1.70") into filters (hallucinated IPs are validated away)
 - **Protocol detail** — dedicated DNS, HTTP, and TLS tables with full-text search; weak TLS versions and HTTP error codes are highlighted
+- **GeoIP/ASN enrichment** — external hosts annotated with country and network owner (optional MaxMind GeoLite2 databases; degrades to public/private classification without them)
+- **Report export** — one click downloads a full markdown report (executive summary, stats, detections with evidence)
 - **Session history** — past analyses stored server-side and reloadable from any browser
 
 ---

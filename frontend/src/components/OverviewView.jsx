@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import * as api from '../api';
 
 const STATE_COLORS = {
   SF: '#3fb950', S0: '#f85149', REJ: '#f85149', RSTO: '#e3b341',
@@ -10,10 +11,15 @@ const STATE_LABELS = {
   RSTR: 'Reset by resp.', RSTOS0: 'Reset before reply', OTH: 'Mid-stream',
 };
 
-function BarChart({ items, getLabel, getCount, color, getBarColor }) {
+function BarChart({ items, getLabel, getCount, color, getBarColor, onRowClick, rowTitle }) {
   const max = Math.max(...items.map(getCount), 1);
   return items.map((item, i) => (
-    <div key={i} className="bar-row">
+    <div
+      key={i}
+      className={`bar-row${onRowClick ? ' clickable' : ''}`}
+      onClick={onRowClick ? () => onRowClick(item) : undefined}
+      title={onRowClick ? rowTitle : undefined}
+    >
       <span className="bar-label">{getLabel(item)}</span>
       <div className="bar-track">
         <div
@@ -29,7 +35,56 @@ function BarChart({ items, getLabel, getCount, color, getBarColor }) {
   ));
 }
 
-export default function OverviewView({ stats, pcapName, timings, aiSummary, aiLoading }) {
+function GeoIpSection({ jobId }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    api.getGeoip(jobId, 100)
+      .then(d => live && setData(d))
+      .catch(() => live && setError(true));
+    return () => { live = false; };
+  }, [jobId]);
+
+  if (error || !data) return null;
+
+  const external = data.peers.filter(p => p.scope === 'public');
+  if (external.length === 0) return null;
+
+  const dbActive = data.status.city_db || data.status.asn_db;
+
+  return (
+    <div className="ov-section">
+      <div className="ov-section-title">
+        External Hosts
+        <span className="ov-section-sub">{data.external_count} public IPs</span>
+      </div>
+      {!dbActive && (
+        <div className="ov-geo-note">
+          Showing external IPs. Add MaxMind GeoLite2 databases to see country and network (ASN) details.
+        </div>
+      )}
+      <div className="ov-list">
+        {external.slice(0, 15).map((p, i) => (
+          <div key={i} className="ov-list-item ov-geo-row">
+            <span className="ov-list-label col-ip">{p.ip}</span>
+            <span className="ov-geo-meta">
+              {p.country && <span className="ov-geo-country">{p.country}</span>}
+              {p.org && <span className="ov-geo-org">AS{p.asn} {p.org}</span>}
+            </span>
+            <span className="ov-list-count">{p.count.toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function OverviewView({
+  jobId, stats, pcapName, timings, aiSummary, aiLoading,
+  onOpenConnections, onOpenProtocols,
+}) {
   if (!stats) return null;
 
   return (
@@ -49,16 +104,24 @@ export default function OverviewView({ stats, pcapName, timings, aiSummary, aiLo
           </div>
         </div>
 
-        {/* Stat cards */}
+        {/* Stat cards — Connections and DNS jump to their detail views */}
         <div className="ov-stats-row">
           {[
-            { value: stats.total_connections.toLocaleString(), label: 'Connections', color: '#58a6ff' },
+            { value: stats.total_connections.toLocaleString(), label: 'Connections', color: '#58a6ff',
+              onClick: onOpenConnections ? () => onOpenConnections({}) : null, hint: 'Browse all connections' },
             { value: stats.unique_src_ips,                     label: 'Source IPs',  color: '#bc8cff' },
             { value: stats.unique_dst_ips,                     label: 'Dest. IPs',   color: '#e3b341' },
-            { value: stats.total_dns.toLocaleString(),         label: 'DNS Events',  color: '#3fb950' },
+            { value: stats.total_dns.toLocaleString(),         label: 'DNS Events',  color: '#3fb950',
+              onClick: onOpenProtocols || null, hint: 'Inspect DNS queries' },
             ...(stats.total_weird > 0 ? [{ value: stats.total_weird, label: 'Weird Events', color: '#f85149' }] : []),
-          ].map(({ value, label, color }) => (
-            <div key={label} className="ov-stat-card" style={{ borderTopColor: color }}>
+          ].map(({ value, label, color, onClick, hint }) => (
+            <div
+              key={label}
+              className={`ov-stat-card${onClick ? ' clickable' : ''}`}
+              style={{ borderTopColor: color }}
+              onClick={onClick || undefined}
+              title={onClick ? hint : undefined}
+            >
               <div className="ov-stat-value" style={{ color }}>{value}</div>
               <div className="ov-stat-label">{label}</div>
             </div>
@@ -90,6 +153,8 @@ export default function OverviewView({ stats, pcapName, timings, aiSummary, aiLo
               )}
               getCount={p => p.count}
               color="#bc8cff"
+              onRowClick={onOpenConnections ? p => onOpenConnections({ dst_port: p.port }) : undefined}
+              rowTitle="View these connections"
             />
           </div>
         )}
@@ -107,6 +172,8 @@ export default function OverviewView({ stats, pcapName, timings, aiSummary, aiLo
               )}
               getCount={s => s.count}
               getBarColor={s => STATE_COLORS[s.state] || '#8b949e'}
+              onRowClick={onOpenConnections ? s => onOpenConnections({ conn_state: s.state }) : undefined}
+              rowTitle="View connections in this state"
             />
           </div>
         )}
@@ -153,6 +220,8 @@ export default function OverviewView({ stats, pcapName, timings, aiSummary, aiLo
             ))}
           </div>
         )}
+
+        {jobId && <GeoIpSection jobId={jobId} />}
 
         <div className="ov-section">
           <div className="ov-section-title">AI Analysis & Next Steps</div>
